@@ -1,0 +1,36 @@
+# =====================================================================
+#  Blueprint Render pour Shisnekai no Kami
+#  -> Sur Render : "New +" > "Blueprint" et pointez sur ce depot.
+#     Render lira ce fichier et configurera tout automatiquement.
+# =====================================================================
+services:
+  - type: web
+    name: shisnekai-no-kami
+    runtime: node
+    plan: free                # Plan gratuit
+    region: frankfurt         # Choisissez la region la plus proche (frankfurt / oregon / singapore...)
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.1
+      # PORT est fourni automatiquement par Render ; server.js l'utilise via process.env.PORT
+      #
+      # PERSISTANCE DES PARTIES EN COURS (survivre a un redemarrage serveur) :
+      #  - Sans REDIS_URL : fallback fichier local data/rooms.json (suffit sur 1 seule instance ;
+      #    mais sur Render free tier le disque est ephemere -> peut etre perdu au redeploiement).
+      #  - Avec REDIS_URL : persistance robuste via Redis (recommande en production).
+      #    Creez une instance Redis (Render Key Value / Upstash gratuit) et renseignez l'URL ci-dessous.
+      # - key: REDIS_URL
+      #   value: rediss://default:MOTDEPASSE@host:port
+    # Disque persistant pour conserver comptes / quiz / classements entre les redemarrages.
+    # NOTE : un disque persistant n'est PAS disponible sur le plan gratuit de Render.
+    #        -> Sur le plan gratuit, les donnees sont stockees dans /data mais peuvent etre
+    #           reinitialisees lors d'un redeploiement (le compte admin + quiz demo sont recrees).
+    #        -> Pour conserver durablement les donnees, passez a un plan payant et
+    #           DECOMMENTEZ le bloc "disk" ci-dessous.
+    # disk:
+    #   name: snk-data
+    #   mountPath: /opt/render/project/src/data
+    #   sizeGB: 1

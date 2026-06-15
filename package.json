@@ -1,0 +1,20 @@
+{
+  "name": "shisnekai-no-kami",
+  "version": "1.0.0",
+  "description": "Shisnekai no Kami - Plateforme de quiz multijoueur temps reel (style Kahoot)",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ioredis": "^5.11.1",
+    "ws": "^8.17.1"
+  },
+  "author": "Shisnekai no Kami",
+  "license": "MIT"
+}

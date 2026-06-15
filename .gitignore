@@ -1,0 +1,10 @@
+# Dependances
+node_modules/
+
+# Donnees runtime (recreees au demarrage : compte admin + quiz demo)
+data/*.json
+
+# Logs / divers
+*.log
+.DS_Store
+.env

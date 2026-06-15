@@ -1,0 +1,66 @@
+============================================================
+   神  SHISNEKAI NO KAMI  -  A LIRE EN PREMIER (3 etapes)
+============================================================
+
+Apres 16h de travail, voici le plus simple. Rien de technique.
+
+
+ETAPE 1  -  Installer Node.js (une seule fois, gratuit)
+------------------------------------------------------------
+  - Allez sur : https://nodejs.org
+  - Telechargez le gros bouton "LTS"
+  - Installez-le (Suivant > Suivant > Terminer)
+
+  (Si Node.js est deja installe, passez a l'etape 2.)
+
+
+ETAPE 2  -  Lancer l'application
+------------------------------------------------------------
+  >>> Sur WINDOWS :
+      Double-cliquez sur le fichier :  LANCER-WINDOWS.bat
+
+  >>> Sur MAC :
+      Double-cliquez sur le fichier :  LANCER.sh
+      (si rien ne se passe : clic droit > Ouvrir > Ouvrir)
+
+  Une fenetre noire s'ouvre et affiche les adresses a utiliser.
+  LAISSEZ CETTE FENETRE OUVERTE pendant que vous jouez.
+
+
+ETAPE 3  -  Jouer
+------------------------------------------------------------
+  VOUS (l'animateur), sur votre ordinateur :
+     Ouvrez votre navigateur a l'adresse :  http://localhost:3000
+     Connectez-vous avec :
+         Identifiant  :  Adonaishinsekai
+         Mot de passe :  1234567
+     Puis : Mes quiz  >  Lancer  ->  un PIN a 6 chiffres s'affiche.
+
+  VOS AMIS (sur leur telephone, MEME WiFi que vous) :
+     Ouvrent l'adresse affichee dans la fenetre noire, du type :
+         http://192.168.x.x:3000/play
+     Ils entrent le PIN + un pseudo  ->  Rejoindre.
+
+  Vous cliquez "Demarrer", et a la fin vous voyez
+  le CLASSEMENT FINAL du 1er au dernier. C'est tout !
+
+  NOUVEAU : dans l'ecran d'attente (lobby), vous avez aussi :
+   - un QR CODE que vos amis scannent pour rejoindre directement
+   - des boutons de PARTAGE : WhatsApp, Facebook, Instagram, TikTok
+   - un bouton "Copier le lien"
+
+
+------------------------------------------------------------
+  BESOIN D'UN VRAI LIEN INTERNET (hors de votre WiFi) ?
+------------------------------------------------------------
+  Quand vous serez repose, ouvrez le fichier :
+      DEPLOIEMENT-RENDER.md
+  Il explique comment obtenir une adresse https publique
+  gratuite (ex: https://shisnekai-no-kami.onrender.com).
+
+  Pour ce soir, l'etape ci-dessus (meme WiFi) suffit pour
+  tester avec les telephones autour de vous.
+
+============================================================
+  Reposez-vous bien.  -  神  S . N . K
+============================================================
