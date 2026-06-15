@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Shisnekai no Kami — Joueur</title>
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#d11414" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Shisnekai" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<link rel="icon" type="image/png" href="icon-192.png" />
+<link rel="stylesheet" href="style.css" />
+<script src="sound.js"></script>
+<script src="cgu.js"></script>
+</head>
+<body>
+  <div id="splash">
+    <img src="snk-mask.png" alt="Shisnekai no Kami" class="mask-logo" />
+    <div class="splash-title">Shisnekai <span>no Kami</span></div>
+    <div class="splash-sub">神 · JOUEUR</div>
+    <div class="splash-loader"></div>
+    <div class="splash-dev">Conçu par Adonai Kabongo</div>
+  </div>
+  <div id="bg-logo"></div>
+  <div id="bg-overlay"></div>
+  <div id="app">
+    <header class="top">
+      <div class="brand">
+        <div class="mark">SNK</div>
+        <div><h1>Shisnekai <span>no Kami</span></h1><small>神 · JOUEUR</small></div>
+      </div>
+      <div class="userbox" id="status"></div>
+    </header>
+    <main id="screen"></main>
+    <footer>Shisnekai no Kami — 神 · <span>S·N·K</span></footer>
+  </div>
+
+  <!-- Agent IA -->
+  <div class="ai-agent" id="aiAgent">
+    <div>
+      <div class="ai-name">Kami · IA</div>
+      <div class="ai-bubble" id="aiBubble"></div>
+    </div>
+    <div class="ai-avatar">🦊</div>
+  </div>
+  <button class="ai-toggle" id="aiToggle" onclick="toggleVoice()">🔊 Voix : ON</button>
+  <button class="ai-toggle" id="soundToggle" onclick="toggleSound()" style="bottom:118px">🎵 Son : ON</button>
+
+<script>
+const $ = s => document.querySelector(s);
+const SOCIAL = { instagram:'https://www.instagram.com/shinsekai_no__kami', tiktok:'https://www.tiktok.com/@shinsekai_no_kami', whatsappGroup:'https://chat.whatsapp.com/GrD1ASN2NC1Dhi9ew6iKjk?s=sh&p=a&mlu=' };
+function socialFollowHtml(){
+  return `<div class="social-follow"><p class="social-title">✨ Suivez Shisnekai no Kami !</p>
+    <div class="social-btns">
+      <a class="social-btn wa" href="${SOCIAL.whatsappGroup}" target="_blank" rel="noopener" onclick="waInviteAction('joined')">💬 Groupe WhatsApp</a>
+      <a class="social-btn ig" href="${SOCIAL.instagram}" target="_blank" rel="noopener">📸 Instagram</a>
+      <a class="social-btn tt" href="${SOCIAL.tiktok}" target="_blank" rel="noopener">🎵 TikTok</a>
+    </div></div>`;
+}
+function waInviteStatus(){ try{ return localStorage.getItem('snk_wa')||''; }catch{ return ''; } }
+function waSnoozeUntil(){ try{ return parseInt(localStorage.getItem('snk_wa_snooze')||'0'); }catch{ return 0; } }
+function maybeShowWhatsappInvite(){
+  const st=waInviteStatus(); if(st==='member'||st==='joined') return;
+  if(Date.now()<waSnoozeUntil()) return; if(document.getElementById('waInvite')) return;
+  const g=document.createElement('div'); g.id='waInvite'; g.className='wa-invite';
+  g.innerHTML=`<div class="wa-card"><div class="wa-emoji">🦊💬</div>
+    <h3>Rejoins la communauté Shinsekai no Kami !</h3>
+    <p>Défis exclusifs, championnats, fun entre otakus et quiz en avant-première… <b>la vraie aventure se vit dans le groupe WhatsApp !</b> 🔥</p>
+    <a class="btn gold" href="${SOCIAL.whatsappGroup}" target="_blank" rel="noopener" onclick="waInviteAction('joined')">🟢 Rejoindre le groupe</a>
+    <button class="btn alt" onclick="waInviteAction('member')">✅ J'y suis déjà</button>
+    <button class="wa-later" onclick="waInviteAction('later')">Plus tard / Non merci</button></div>`;
+  document.body.appendChild(g);
+}
+function waInviteAction(action){
+  try{ if(action==='member'||action==='joined') localStorage.setItem('snk_wa',action);
+    if(action==='later') localStorage.setItem('snk_wa_snooze',String(Date.now()+3*24*3600*1000)); }catch{}
+  const g=document.getElementById('waInvite'); if(g) g.remove();
+}
+(function trackVisit(){ try{ let v=localStorage.getItem('snk_vid'); if(!v){v='v-'+Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem('snk_vid',v);} fetch('/api/visit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({vid:v})}).catch(()=>{}); }catch(e){} })();
+const screen = $('#screen');
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let ws=null, myName='', joined=false, answered=false;
+/* --- Reconnexion --- */
+let myPin=null, myPlayerId=null, mySessionToken=null;
+let intentionalClose=false, reconnecting=false, reconnectAttempt=0, reconnectTimer=null;
+const FIB=[1,1,2,3,5,8,13,21]; // backoff (secondes), plafonne
+function reconnectDelay(n){ return (FIB[Math.min(n, FIB.length-1)]||21) * 1000; }
+function showReconnect(on, txt){
+  let o=document.getElementById('reconOverlay');
+  if(on){
+    if(!o){ o=document.createElement('div'); o.id='reconOverlay'; o.className='recon-overlay';
+      o.innerHTML='<div class="recon-box"><div class="recon-spin"></div><div id="reconTxt"></div></div>'; document.body.appendChild(o); }
+    document.getElementById('reconTxt').textContent = txt || 'Reconnexion en cours…';
+    o.style.display='flex';
+  } else if(o){ o.style.display='none'; }
+}
+let myMascot='ninja', myTeamId=null, MASCOTS=[], roomTeams=[], teamMode=false, teamAssign='choose';
+let voiceOn = true;
+
+/* ---------- Agent IA : bulle + voix ---------- */
+let aiTimer=null;
+function aiShow(text){
+  const a=$('#aiAgent'), b=$('#aiBubble');
+  if(!a||!b||!text) return;
+  b.textContent=text; a.classList.add('show');
+  clearTimeout(aiTimer); aiTimer=setTimeout(()=>a.classList.remove('show'), 6500);
+  speak(text);
+}
+function speak(text){
+  if(!voiceOn || !('speechSynthesis' in window)) return;
+  try{
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(text.replace(/[🦊🥷🦄🐼🐻🐯🐲🦉🐺🐱🐸🐙🔥⚡🎯😏😎😱👏✨🏆👑🎉⚖️😼🎁😈🎵📸🟢🔵]/g,''));
+    u.lang='fr-FR'; u.rate=1.05; u.pitch=1.05;
+    const v=speechSynthesis.getVoices().find(v=>/fr/i.test(v.lang));
+    if(v) u.voice=v;
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+function toggleVoice(){ voiceOn=!voiceOn; $('#aiToggle').textContent = voiceOn?'🔊 Voix : ON':'🔇 Voix : OFF'; if(!voiceOn && 'speechSynthesis' in window) speechSynthesis.cancel(); }
+
+/* ---------- Son (Web Audio) ---------- */
+function refreshSoundBtn(){ const b=$('#soundToggle'); if(b&&window.SNKSound){ b.textContent=SNKSound.isEnabled()?'🎵 Son : ON':'🔇 Son : OFF'; } }
+function toggleSound(){ if(!window.SNKSound) return; SNKSound.unlock(); SNKSound.setEnabled(!SNKSound.isEnabled()); SNKSound.click(); refreshSoundBtn(); }
+document.addEventListener('click', ()=>{ if(window.SNKSound) SNKSound.unlock(); }, { once:true });
+window.addEventListener('load', refreshSoundBtn);
+if('speechSynthesis' in window){ speechSynthesis.onvoiceschanged=()=>{}; }
+
+function wsUrl(){ const p=location.protocol==='https:'?'wss':'ws'; return p+'://'+location.host; }
+function setStatus(txt, ok){ $('#status').innerHTML = `<span class="conn-dot ${ok?'':'off'}"></span> ${esc(txt)}`; }
+function mascotHtml(id, size){ const m=MASCOTS.find(x=>x.id===id)||{emoji:'🦊',c1:'#444',c2:'#111'};
+  return `<span class="mascot ${size||'m'}" style="--m1:${m.c1};--m2:${m.c2}"><span class="em">${m.emoji}</span></span>`; }
+
+function launchConfetti(duration){
+  let cv=document.getElementById('confetti');
+  if(!cv){ cv=document.createElement('canvas'); cv.id='confetti'; document.body.appendChild(cv); }
+  const ctx=cv.getContext('2d');
+  function resize(){ cv.width=innerWidth; cv.height=innerHeight; } resize();
+  const colors=['#d11414','#e8c46a','#2b6bd1','#26b34a','#ff2b2b','#ffffff'];
+  const parts=Array.from({length:120},()=>({x:Math.random()*cv.width,y:-20-Math.random()*cv.height*0.4,r:4+Math.random()*6,c:colors[Math.floor(Math.random()*colors.length)],vy:2+Math.random()*4,vx:-2+Math.random()*4,rot:Math.random()*6.28,vr:-0.2+Math.random()*0.4}));
+  const start=Date.now();
+  (function frame(){ ctx.clearRect(0,0,cv.width,cv.height);
+    parts.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.rot+=p.vr;p.vy+=0.03;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);ctx.fillStyle=p.c;ctx.fillRect(-p.r/2,-p.r/2,p.r,p.r*0.6);ctx.restore();});
+    if(Date.now()-start<duration) requestAnimationFrame(frame); else ctx.clearRect(0,0,cv.width,cv.height);
+  })();
+}
+
+async function loadMascots(){
+  try{ const r=await fetch('/api/mascots'); MASCOTS=(await r.json()).mascots; }catch{ MASCOTS=[{id:'ninja',name:'Ninja',emoji:'🥷',c1:'#3a3a4a',c2:'#15151f'}]; }
+}
+
+function viewJoin(msg){
+  setStatus('Non connecté', false);
+  screen.innerHTML=`<div class="card">
+    <div class="landing-logo">
+      <img src="snk-mask.png" alt="Shisnekai no Kami" class="mask-logo"/>
+      <div class="landing-title">Shisnekai <span>no Kami</span></div>
+      <div class="landing-sub">神 · REJOINDRE UNE PARTIE</div>
+    </div>
+    ${msg?`<div class="msg err" style="display:block">${esc(msg)}</div>`:''}
+    <label>PIN de la partie</label>
+    <input id="pin" inputmode="numeric" maxlength="6" placeholder="000000" style="text-align:center;font-size:30px;letter-spacing:8px;"/>
+    <label>Votre pseudo</label>
+    <input id="name" maxlength="20" placeholder="Votre nom de joueur"/>
+    <label>Choisissez votre mascotte</label>
+    <div class="mascot-grid" id="mgrid"></div>
+    <div class="mt"><button class="btn gold" onclick="doJoin()">Rejoindre la partie</button></div>
+    <p class="hint center mt">Vous êtes l'animateur ? <a href="/" style="color:var(--rouge-clair)">Espace création</a></p>
+    <div class="dev-card">
+      <div class="dev-ava">👨‍💻</div>
+      <div class="dev-info">
+        <div class="dev-role">Développeur</div>
+        <div class="dev-name">Adonai Kabongo</div>
+        <a class="dev-contact" href="https://wa.me/13439987628" target="_blank" rel="noopener">🟢 WhatsApp : +1 343 998 7628</a>
+      </div>
+    </div>
+  </div>`;
+  renderMascotGrid();
+  const saved=sessionStorage.getItem('snk_pname'); if(saved && $('#name')) $('#name').value=saved;
+  const sm=sessionStorage.getItem('snk_mascot'); if(sm){ myMascot=sm; }
+  const urlPin = new URLSearchParams(location.search).get('pin');
+  if(urlPin && /^\d{6}$/.test(urlPin) && $('#pin')){ $('#pin').value=urlPin; if($('#name')) $('#name').focus(); }
+}
+function renderMascotGrid(){
+  const g=$('#mgrid'); if(!g) return;
+  g.innerHTML = MASCOTS.map(m=>`<div class="mascot-pick ${m.id===myMascot?'sel':''}" onclick="pickMascot('${m.id}')">
+    <span class="mascot l" style="--m1:${m.c1};--m2:${m.c2}"><span class="em">${m.emoji}</span></span>
+    <div class="nm">${esc(m.name)}</div></div>`).join('');
+}
+function pickMascot(id){ myMascot=id; sessionStorage.setItem('snk_mascot',id); renderMascotGrid(); }
+
+function doJoin(){
+  const pin=$('#pin').value.trim(), name=$('#name').value.trim();
+  if(!/^\d{6}$/.test(pin)){ viewJoin('PIN à 6 chiffres requis.'); return; }
+  if(!name){ viewJoin('Entrez un pseudo.'); return; }
+  myName=name; myPin=pin; intentionalClose=false; reconnectAttempt=0; sessionStorage.setItem('snk_pname', name);
+  setStatus('Connexion…', false);
+  openSocket(()=> ws.send(JSON.stringify({ type:'join', pin, name, mascot:myMascot })));
+}
+function openSocket(onOpen){
+  ws=new WebSocket(wsUrl());
+  ws.onopen=()=>{ reconnectAttempt=0; if(onOpen) onOpen(); };
+  ws.onmessage=onMessage;
+  ws.onclose=()=>{
+    if(intentionalClose) return;
+    if(joined && myPlayerId && mySessionToken){ scheduleReconnect(); }
+    else if(!joined){ /* echec connexion initiale */ }
+    else setStatus('Déconnecté', false);
+  };
+  ws.onerror=()=>{ if(!joined && !reconnecting) viewJoin('Connexion impossible au serveur.'); };
+}
+function scheduleReconnect(){
+  reconnecting=true;
+  const delay=reconnectDelay(reconnectAttempt);
+  showReconnect(true, 'Connexion perdue… reconnexion ('+Math.round(delay/1000)+'s) — tentative '+(reconnectAttempt+1));
+  setStatus('Reconnexion…', false);
+  clearTimeout(reconnectTimer);
+  reconnectTimer=setTimeout(()=>{
+    reconnectAttempt++;
+    openSocket(()=> ws.send(JSON.stringify({ type:'player-rejoin', pin:myPin, playerId:myPlayerId, sessionToken:mySessionToken })));
+  }, delay);
+}
+function wsSend(type, extra){ if(ws && ws.readyState===1) ws.send(JSON.stringify({type, ...extra})); }
+
+function onMessage(ev){
+  let m; try{ m=JSON.parse(ev.data); }catch{ return; }
+  switch(m.type){
+    case 'join-error': joined=false; intentionalClose=true; viewJoin(m.message); try{ws.close();}catch{} break;
+    case 'joined':
+      joined=true; reconnecting=false; showReconnect(false);
+      myPlayerId=m.playerId; mySessionToken=m.sessionToken;
+      teamMode=m.teamMode; teamAssign=m.teamAssign; roomTeams=m.teams||[]; myTeamId=m.teamId;
+      if(m.mode==='duel'){ setStatus(myName+' · duel', true); screen.innerHTML='<div class="card center">'+mascotHtml(myMascot,'xl')+'<div class="big-status mt">🆚 En attente de l\'adversaire…</div><p class="hint">Le duel démarre dès que vous êtes 2.</p></div>'; }
+      else if(teamMode && teamAssign==='choose') viewChooseTeam(m.title); else viewWaiting(m.title);
+      break;
+    /* --- Reconnexion reussie : resync selon l'etat --- */
+    case 'rejoin-fail': reconnecting=false; showReconnect(false); joined=false; intentionalClose=true; viewKicked(m.message||'Reconnexion impossible.'); break;
+    case 'rejoined-lobby': reconnecting=false; showReconnect(false); teamMode=m.teamMode; roomTeams=m.teams||[]; myTeamId=m.teamId; viewWaiting(m.title); break;
+    case 'rejoined-question': reconnecting=false; showReconnect(false); resumeQuestion(m); break;
+    case 'rejoined-reveal': reconnecting=false; showReconnect(false); viewReveal(m); break;
+    case 'duel-lobby': viewDuelWait(m); break;
+    case 'game-start': ensurePlayerChatBar(); viewGetReady(); break;
+    case 'question': viewQuestion(m); break;
+    case 'answer-ack': if(!m.duplicate) viewAnswered(); break;
+    case 'answer-too-late': answered=true; aiShow(m.message||'Trop tard pour cette question.'); break;
+    case 'reveal': viewReveal(m); break;
+    case 'gameover': viewGameover(m); break;
+    case 'ai': aiShow(m.text); break;
+    case 'rate-limited': aiShow('⏳ Trop d\'actions, patiente une seconde.'); break;
+    case 'score-adjusted': aiShow(m.delta<0?`L'animateur t'a retiré ${Math.abs(m.delta)} points.`:`+${m.delta} points de l'animateur !`); break;
+    case 'chat': playerChatMsg(m.entry); break;
+    case 'react': floatReact(m.emoji); break;
+    /* --- Mode COURSE (buzzer) --- */
+    case 'race-question': ensurePlayerChatBar(); viewRaceQuestion(m); break;
+    case 'race-feedback': raceFeedback(m); break;
+    case 'race-winner': viewRaceWinner(m); break;
+    case 'race-over': viewRaceOver(m); break;
+    case 'race-error': aiShow(m.message); break;
+    case 'kicked': joined=false; intentionalClose=true; try{ws.close();}catch{}; showReconnect(false); viewKicked(m.reason); break;
+    case 'error': alert(m.message); break;
+  }
+}
+/* Chat + reactions cote joueur (bulle bas + barre flottante) */
+function playerChatMsg(e){
+  let box=document.getElementById('pChat');
+  if(!box){ box=document.createElement('div'); box.id='pChat';
+    box.style.cssText='position:fixed;left:8px;right:8px;bottom:66px;z-index:9300;max-height:120px;overflow-y:auto;background:rgba(12,12,16,.92);border:1px solid #2c2c2c;border-radius:12px;padding:6px 8px;font-size:12px;';
+    document.body.appendChild(box); }
+  const d=document.createElement('div'); d.style.marginBottom='3px';
+  if(e.sys){ d.style.color='#888'; d.style.fontStyle='italic'; d.textContent=e.text; }
+  else d.innerHTML='<b style="color:'+(e.kind==='host'?'#ff7a7a':e.kind==='player'?'#5aa0ff':'#bbb')+'">'+esc(e.from)+':</b> '+esc(e.text);
+  box.appendChild(d); box.scrollTop=box.scrollHeight;
+}
+function ensurePlayerChatBar(){
+  if(document.getElementById('pChatBar')) return;
+  const bar=document.createElement('div'); bar.id='pChatBar';
+  bar.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:9300;display:flex;gap:6px;';
+  bar.innerHTML='<input id="pChatInput" maxlength="200" placeholder="💬 message…" style="flex:1;padding:9px 10px;border-radius:10px;border:1px solid #333;background:#141414;color:#fff;font-size:14px"/>'
+    +'<button id="pReactBtn" style="border:none;border-radius:10px;background:#222;color:#fff;padding:0 12px;font-size:18px;cursor:pointer">😀</button>';
+  document.body.appendChild(bar);
+  $('#pChatInput').addEventListener('keydown',e=>{ if(e.key==='Enter'){ const v=e.target.value.trim(); if(v){ wsSend('chat',{text:v}); e.target.value=''; } } });
+  $('#pReactBtn').onclick=()=>{ ['👍','❤️','😂','😮','🔥','👏','😱','🦊'].forEach(()=>{}); const e=['👍','❤️','😂','😮','🔥','👏','😱','🦊'][Math.floor(Math.random()*8)]; wsSend('react',{emoji:e}); };
+}
+function floatReact(emoji){
+  const el=document.createElement('div'); el.textContent=emoji;
+  el.style.cssText='position:fixed;z-index:9600;font-size:34px;pointer-events:none;left:'+(30+Math.random()*50)+'%;bottom:120px;transition:none;';
+  el.animate([{transform:'translateY(0) scale(.6)',opacity:0},{transform:'translateY(-30px) scale(1.1)',opacity:1,offset:.15},{transform:'translateY(-220px) scale(1)',opacity:0}],{duration:2400,easing:'ease-out'});
+  document.body.appendChild(el); setTimeout(()=>el.remove(),2400);
+}
+/* Reprend une question apres reconnexion, avec le temps restant calcule par le serveur */
+function resumeQuestion(m){
+  answered = !!m.alreadyAnswered;
+  viewQuestion({ index:m.index, total:m.total, text:m.text, optionCount:m.optionCount, options:m.options,
+    image:m.image, audio:m.audio, time:m.timeLeft });
+  if(answered){ document.querySelectorAll('.player-answers .answer-btn').forEach(b=>b.disabled=true);
+    aiShow('Réponse déjà envoyée, en attente des résultats…'); }
+}
+
+function viewChooseTeam(title){
+  setStatus(myName+' · choix équipe', true);
+  screen.innerHTML=`<div class="card center">
+    <h2 class="title">Choisissez votre <span>équipe</span></h2>
+    <p class="subtitle">${esc(title)}</p>
+    <div class="team-pick" id="tpick">${roomTeams.map(t=>`
+      <div class="team-card ${t.id===myTeamId?'sel':''}" onclick="pickTeam('${t.id}')" style="${t.id===myTeamId?'border-color:'+t.color:''}">
+        <span class="team-badge" style="background:${t.color}"></span>
+        <div class="tn" style="color:${t.color}">${esc(t.name)}</div></div>`).join('')}</div>
+    <div class="mt"><button class="btn gold" onclick="confirmTeam()">Valider mon équipe</button></div>
+  </div>`;
+}
+function pickTeam(id){ myTeamId=id; viewChooseTeam(document.querySelector('.subtitle')?.textContent||''); }
+function confirmTeam(){
+  if(!myTeamId){ alert('Choisissez une équipe.'); return; }
+  wsSend('set-team', { teamId:myTeamId });
+  const t=roomTeams.find(x=>x.id===myTeamId);
+  viewWaiting(null, t);
+}
+
+function viewDuelWait(m){
+  setStatus(myName+' · duel', true);
+  const ps=(m.players||[]);
+  screen.innerHTML=`<div class="card center"><h2 class="title">🆚 Duel <span>1v1</span></h2>
+    <div class="vs-wrap">${ps.map((p,i)=>`${i>0?'<div class="vs-mid">VS</div>':''}<div class="vs-side ${i===0?'me':'kami'}"><div class="vs-ava">${mascotEmoji(p.mascot)}</div><div class="vs-name">${esc(p.name)}</div></div>`).join('')}
+      ${ps.length<(m.need||2)?'<div class="vs-mid">VS</div><div class="vs-side kami"><div class="vs-ava">⏳</div><div class="vs-name">…</div></div>':''}</div>
+    <div class="big-status mt">${ps.length>=(m.need||2)?'⚔️ Que le duel commence !':'En attente de l adversaire…'}</div>
+    <p class="hint">${ps.length}/${m.need||2} joueurs</p></div>`;
+}
+function mascotEmoji(id){ const m=MASCOTS.find(x=>x.id===id); return m?m.emoji:'🦊'; }
+function viewWaiting(title, team){
+  setStatus(myName+' · connecté', true);
+  const tHtml = (teamMode && (team||roomTeams.find(t=>t.id===myTeamId)))
+    ? (()=>{ const t=team||roomTeams.find(t=>t.id===myTeamId); return `<p class="subtitle">Équipe : <b style="color:${t.color}">${esc(t.name)}</b></p>`; })()
+    : (teamMode && teamAssign==='auto' ? `<p class="subtitle">Équipe attribuée au démarrage 🎲</p>`:'');
+  screen.innerHTML=`<div class="card center">
+    ${mascotHtml(myMascot,'xl')}
+    <h2 class="title mt">C'est bon, <span>${esc(myName)}</span> !</h2>
+    ${title?`<p class="subtitle">${esc(title)}</p>`:''}
+    ${tHtml}
+    <div class="big-status">⏳ En attente du démarrage…</div>
+    <p class="hint">Gardez cet écran ouvert. Le Kami va bientôt parler. 🦊</p>
+  </div>`;
+}
+function viewGetReady(){
+  screen.innerHTML=`<div class="card center">${mascotHtml(myMascot,'xl')}<div class="big-status mt">🦊 Préparez-vous…</div>
+    <p class="subtitle">La question arrive !</p></div>`;
+}
+/* ---- Mode COURSE (buzzer) côté joueur ---- */
+let raceAnswered=false;
+function viewRaceQuestion(m){
+  raceAnswered=false;
+  setStatus(myName+' · Course', true);
+  screen.innerHTML=`<div class="card">
+    <div class="qmeta"><span>Question ${m.index+1}</span><span>⏱ <b id="tleft">${m.time}</b>s</span></div>
+    <div class="timer-bar"><div class="timer-fill" id="tfill" style="width:100%"></div></div>
+    <div class="qbig">${esc(m.text)}</div>
+    ${m.desc?`<p class="hint center">${esc(m.desc)}</p>`:''}
+    <p class="hint center">⚡ Tape vite la bonne réponse — le 1er gagne !</p>
+    <div class="row mt"><input id="raceInput" maxlength="120" placeholder="Ta réponse…" style="flex:2;font-size:18px" onkeydown="if(event.key==='Enter')raceSubmit()"/>
+      <button class="btn gold" style="flex:1" onclick="raceSubmit()">Valider</button></div>
+    <div id="raceFb" class="mt center"></div>
+  </div>`;
+  setTimeout(()=>{ const i=$('#raceInput'); if(i) i.focus(); },200);
+  let t=m.time; if(window.SNKSound)SNKSound.tickStart(m.time);
+  if(window._ptimer)clearInterval(window._ptimer);
+  window._ptimer=setInterval(()=>{ t--; if($('#tleft'))$('#tleft').textContent=Math.max(0,t); if($('#tfill'))$('#tfill').style.width=(Math.max(0,t)/m.time*100)+'%'; if(t<=0)clearInterval(window._ptimer); },1000);
+}
+function raceSubmit(){
+  if(raceAnswered) return;
+  const i=$('#raceInput'); if(!i||!i.value.trim()) return;
+  wsSend('race-answer',{answer:i.value.trim()});
+  i.value='';
+}
+function raceFeedback(m){
+  const fb=$('#raceFb'); if(!fb) return;
+  if(m.won){ raceAnswered=true; fb.innerHTML='<div class="big-status good">✅ Bravo ! +'+(m.pts||0)+'</div>'; if(window.SNKSound)SNKSound.correct(); }
+  else if(m.already){ fb.innerHTML='<p class="hint">Quelqu\'un a déjà trouvé… 😅</p>'; }
+  else if(m.tooMany){ fb.innerHTML='<p class="hint">Trop d\'essais sur cette question.</p>'; }
+  else { fb.innerHTML='<p style="color:#ff9a9a">❌ Pas ça, réessaie vite !</p>'; if(window.SNKSound)SNKSound.wrong(); }
+}
+function viewRaceWinner(m){
+  if(window._ptimer)clearInterval(window._ptimer); if(window.SNKSound)SNKSound.tickStop();
+  const medals=['🥇','🥈','🥉'];
+  const mine=(m.leaderboard||[]).find(p=>p.name===myName);
+  screen.innerHTML=`<div class="card center">
+    ${m.winner?`<div class="big-status ${m.winner===myName?'good':''}">⚡ ${esc(m.winner)} a gagné !</div>`:`<div class="big-status">⏱️ Temps écoulé</div>`}
+    <p class="subtitle">Réponse : <b style="color:var(--or)">${esc(m.answer)}</b></p>
+    <table class="lb" style="max-width:400px;margin:8px auto 0"><tr><th>#</th><th>Joueur</th><th>Score</th></tr>
+    ${(m.leaderboard||[]).map((p,i)=>`<tr class="${p.name===myName?'rank-1':''}"><td class="rk">${i+1}</td><td>${esc(p.name)}</td><td>${p.score}</td></tr>`).join('')}</table>
+    <p class="hint mt">En attente de la prochaine question…</p></div>`;
+  if(m.winner===myName){ launchConfetti(2000); if(window.SNKSound)SNKSound.fanfare(); }
+}
+function viewRaceOver(m){
+  if(window._ptimer)clearInterval(window._ptimer);
+  const medals=['🥇','🥈','🥉']; const mine=(m.leaderboard||[]).find(p=>p.name===myName);
+  screen.innerHTML=`<div class="card center"><h2 class="title">🏁 Course <span>terminée</span></h2>
+    ${mine?`<div class="big-status ${mine.rank===1?'good':''}">${mine.rank<=3?medals[mine.rank-1]+' ':''}${mine.rank}<sup></sup> place</div><p class="subtitle">Votre score : <b style="color:var(--or)">${mine.score}</b></p>`:''}
+    <table class="lb" style="max-width:400px;margin:8px auto 0"><tr><th>#</th><th>Joueur</th><th>Score</th></tr>
+    ${m.leaderboard.map(p=>`<tr class="${p.name===myName?'rank-1':''}"><td class="rk">${p.rank<=3?medals[p.rank-1]:p.rank}</td><td>${esc(p.name)}</td><td>${p.score}</td></tr>`).join('')}</table>
+    <div class="mt"><button class="btn" onclick="location.reload()">Rejouer</button></div>
+    ${socialFollowHtml()}</div>`;
+  if(mine&&mine.rank<=3){ launchConfetti(3000); if(window.SNKSound)SNKSound.fanfare(); }
+}
+function viewKicked(reason){
+  setStatus('Exclu', false);
+  screen.innerHTML=`<div class="card center"><div class="big-status bad">🚫 Exclu de la partie</div>
+    <p class="subtitle">${esc(reason||'Vous avez été retiré.')}</p>
+    <div class="mt"><button class="btn" onclick="location.href='/play'">Retour</button></div></div>`;
+}
+
+function viewQuestion(m){
+  answered=false;
+  setStatus(myName+' · Q'+(m.index+1), true);
+  const colors=['a0','a1','a2','a3'], sym=['▲','◆','●','■'];
+  const n=m.optionCount;
+  screen.innerHTML=`<div class="card">
+    <div class="qmeta"><span>Question ${m.index+1} / ${m.total}</span><span><b id="tleft">${m.time}</b>s</span></div>
+    <div class="timer-bar"><div class="timer-fill" id="tfill" style="width:100%"></div></div>
+    <div class="qbig">${esc(m.text)}</div>
+    ${m.image?`<div class="game-media"><img src="${m.image}" class="game-img" alt="média"/></div>`:''}
+    ${m.audio?`<div class="game-media"><audio id="qaudio" src="${m.audio}" controls autoplay preload="auto" class="game-audio"></audio>
+      <div><button class="btn alt small" onclick="(function(){var a=document.getElementById('qaudio');if(a){a.currentTime=0;a.play().catch(()=>{});}})()">🔊 Rejouer le son</button></div></div>`:''}
+    <p class="hint center">Touchez votre réponse 👇</p>
+    <div class="player-answers">
+      ${Array.from({length:n}).map((_,i)=>`<button class="answer-btn ${colors[i]}" onclick="answer(${i})"><span class="sym">${sym[i]}</span></button>`).join('')}
+    </div></div>`;
+  let t=m.time;
+  if(window.SNKSound && m.time>0) SNKSound.tickStart(m.time);
+  if(window._ptimer) clearInterval(window._ptimer);
+  window._ptimer=setInterval(()=>{ t--; if($('#tleft'))$('#tleft').textContent=Math.max(0,t);
+    if($('#tfill'))$('#tfill').style.width=(Math.max(0,t)/m.time*100)+'%';
+    if(t<=0) clearInterval(window._ptimer); },1000);
+}
+function answer(opt){
+  if(answered) return; answered=true;
+  if(window.SNKSound){ SNKSound.tickStop(); SNKSound.click(); }
+  wsSend('answer',{ opt });
+  document.querySelectorAll('.player-answers .answer-btn').forEach((b,i)=>{ b.disabled=true; if(i!==opt) b.classList.add('wrong'); });
+}
+function viewAnswered(){
+  if(window._ptimer) clearInterval(window._ptimer);
+  if(window.SNKSound) SNKSound.tickStop();
+  screen.innerHTML=`<div class="card center"><div class="big-status">✅ Réponse envoyée !</div>
+    <p class="subtitle">En attente des autres joueurs…</p>
+    <p class="hint">Plus vous répondez vite, plus vous gagnez de points.</p></div>`;
+}
+function viewReveal(m){
+  if(window._ptimer) clearInterval(window._ptimer);
+  if(window.SNKSound){ SNKSound.tickStop(); m.youCorrect ? SNKSound.correct() : SNKSound.wrong(); }
+  const good=m.youCorrect;
+  let teamHtml='';
+  if(teamMode && m.teams && m.teams.length){
+    teamHtml=`<h3 class="mt" style="color:var(--or)">Score des équipes</h3>`+
+      m.teams.map(t=>`<div class="team-row"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}<span class="team-score">${t.score}</span></div>`).join('');
+  }
+  screen.innerHTML=`<div class="card center">
+    <div class="big-status ${good?'good':'bad'}">${good?'✔ Bonne réponse !':'✗ Mauvaise réponse'}</div>
+    ${good?`<p class="subtitle">+${m.youPts} points</p>`:'<p class="subtitle">Pas de points cette fois</p>'}
+    <table class="lb" style="max-width:340px;margin:14px auto 0;">
+      <tr><th>Votre score</th><th>Rang</th></tr>
+      <tr class="rank-1"><td><b>${m.score}</b></td><td>${m.rank?(m.rank+' / '+m.total):'-'}</td></tr></table>
+    ${teamHtml}
+    <p class="hint mt">Prochaine question bientôt…</p></div>`;
+}
+function viewGameover(m){
+  setStatus(myName+' · terminé', true);
+  const medals=['🥇','🥈','🥉'];
+  let teamHtml='';
+  if(m.teamMode && m.teams && m.teams.length){
+    teamHtml=`<h3 class="mt" style="color:var(--or)">Classement des équipes</h3>`+
+      m.teams.map(t=>`<div class="team-row"><span class="dot" style="background:${t.color}"></span><b>${t.rank}.</b> ${esc(t.name)}<span class="team-score">${t.score}</span></div>`).join('');
+  }
+  screen.innerHTML=`<div class="card center">
+    <h2 class="title">🏁 Partie <span>terminée</span></h2>
+    ${mascotHtml(myMascot,'xl')}
+    <div class="big-status ${m.rank===1?'good':''}">${m.rank<=3?medals[m.rank-1]+' ':''}${m.rank} / ${m.total}</div>
+    <p class="subtitle">Votre score final : <b style="color:var(--or)">${m.score}</b></p>
+    ${teamHtml}
+    ${m.podium && m.podium.length?`<h3 class="mt" style="color:var(--or)">Podium</h3>
+      <table class="lb" style="max-width:400px;margin:8px auto 0;"><tr><th>#</th><th>Joueur</th><th>Score</th></tr>
+      ${m.podium.map((p,i)=>`<tr class="${i===0?'rank-1':''}"><td class="rk">${medals[i]}</td><td>${mascotHtml(p.mascot,'s')} ${esc(p.name)}</td><td>${p.score}</td></tr>`).join('')}</table>`:''}
+    <div class="mt"><button class="btn" onclick="location.reload()">Rejouer</button></div>
+    <p class="hint mt">Merci d'avoir joué ! 🦊</p>
+    ${socialFollowHtml()}</div>`;
+  if(m.rank && m.rank<=3){ launchConfetti(m.rank===1?3000:2000); if(window.SNKSound) SNKSound.fanfare(); }
+  else if(window.SNKSound) SNKSound.lose();
+}
+
+function hideSplash(){ const s=document.getElementById('splash'); if(s){ s.classList.add('hide'); setTimeout(()=>{ if(s) s.remove(); },600); } }
+if('serviceWorker' in navigator){ window.addEventListener('load', ()=>{ navigator.serviceWorker.register('/sw.js').catch(()=>{}); }); }
+/* Portail de consentement CGU (obligatoire avant de jouer) */
+const CGU_VERSION='1.0';
+function consentGiven(){ try{ return localStorage.getItem('snk_cgu')===CGU_VERSION; }catch{ return false; } }
+function requireConsent(){ return new Promise(resolve=>{
+  if(consentGiven()){ resolve(true); return; }
+  const g=document.createElement('div'); g.id='cgu-gate';
+  g.innerHTML=`<div class="cgu-card">
+    <div class="cgu-top"><img src="ak-emblem.png" alt="AK"/><div><h3>Shisnekai <span>no Kami</span></h3><small>神 · CONDITIONS D'UTILISATION</small></div></div>
+    <div class="cgu-text">${window.SNK_CGU||'<p>CGU</p>'}</div>
+    <div class="cgu-foot"><div class="cgu-msg" id="cguMsg"></div>
+      <label class="cgu-check"><input type="checkbox" id="cguChk"/><span>J'ai lu et j'accepte les Conditions Générales d'Utilisation et la politique de confidentialité (13 ans minimum).</span></label>
+      <div class="cgu-actions"><button class="btn gold" id="cguAccept">✔ J'accepte</button><button class="btn alt" id="cguRefuse">Refuser</button></div></div></div>`;
+  document.body.appendChild(g);
+  g.querySelector('#cguAccept').onclick=()=>{ if(!g.querySelector('#cguChk').checked){ const m=g.querySelector('#cguMsg'); m.style.display='block'; m.innerHTML="🙏 Cochez la case pour pouvoir jouer — merci !"; return; } try{ localStorage.setItem('snk_cgu',CGU_VERSION); localStorage.setItem('snk_cgu_at',new Date().toISOString()); }catch{} g.remove(); resolve(true); };
+  g.querySelector('#cguRefuse').onclick=()=>{ g.querySelector('.cgu-text').innerHTML=`<div style="text-align:center;padding:30px 10px"><div style="font-size:46px">🦊</div><h4 style="color:var(--or)">On vous attend !</h4><p>Sans accepter les conditions, impossible d'entrer (c'est pour protéger tout le monde 🙂). Cochez la case quand vous êtes prêt !</p><span class="cgu-link" id="cguBack">← Revenir et accepter</span></div>`; g.querySelector('#cguBack').onclick=()=>{ g.remove(); requireConsent().then(()=>viewJoin()); }; };
+});}
+(async function init(){ await loadMascots(); setTimeout(hideSplash, 1400); await requireConsent(); viewJoin(); setTimeout(maybeShowWhatsappInvite, 1600); })();
+</script>
+</body>
+</html>

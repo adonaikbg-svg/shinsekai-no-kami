@@ -1,0 +1,1853 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Shisnekai no Kami — Animateur</title>
+<!-- PWA : installable comme une application + couleurs de marque -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#d11414" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black" />
+<meta name="apple-mobile-web-app-title" content="Shisnekai" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<link rel="icon" type="image/png" href="icon-192.png" />
+<link rel="stylesheet" href="style.css" />
+<script src="qrcode.js"></script>
+<script src="sound.js"></script>
+<script src="cgu.js"></script>
+</head>
+<body>
+  <!-- Splash : logo au demarrage de l'application -->
+  <div id="splash">
+    <img src="snk-mask.png" alt="Shisnekai no Kami" class="mask-logo" />
+    <div class="splash-title">Shisnekai <span>no Kami</span></div>
+    <div class="splash-sub">神 · QUIZ DES ESPRITS</div>
+    <div class="splash-loader"></div>
+    <div class="splash-dev">Conçu par Adonai Kabongo</div>
+  </div>
+  <div id="bg-logo"></div>
+  <div id="bg-overlay"></div>
+  <div id="app">
+    <header class="top">
+      <div class="brand">
+        <div class="mark">SNK</div>
+        <div>
+          <h1>Shisnekai <span>no Kami</span></h1>
+          <small>神 · QUIZ DES ESPRITS</small>
+        </div>
+      </div>
+      <div class="userbox" id="userbox"></div>
+    </header>
+    <main id="screen"></main>
+    <footer>Shisnekai no Kami — 神 · Quiz multijoueur temps réel · <span>S·N·K</span></footer>
+  </div>
+
+  <!-- Agent IA -->
+  <div class="ai-agent" id="aiAgent">
+    <div>
+      <div class="ai-name">Kami · IA</div>
+      <div class="ai-bubble" id="aiBubble"></div>
+    </div>
+    <div class="ai-avatar">🦊</div>
+  </div>
+  <button class="ai-toggle" id="aiToggle" onclick="toggleVoice()" style="display:none">🔊 Voix : ON</button>
+  <button class="ai-toggle" id="soundToggle" onclick="toggleSound()" style="bottom:118px">🎵 Son : ON</button>
+
+<script>
+const MAX_PLAYERS = 100;
+const SOCIAL = {
+  instagram: 'https://www.instagram.com/shinsekai_no__kami',
+  tiktok: 'https://www.tiktok.com/@shinsekai_no_kami',
+  whatsappGroup: 'https://chat.whatsapp.com/GrD1ASN2NC1Dhi9ew6iKjk?s=sh&p=a&mlu='
+};
+/* ---------- Invitation au groupe WhatsApp (intelligente) ----------
+   - "J'y suis déjà" -> on ne redemande JAMAIS.
+   - "Non merci" -> on repropose de temps en temps (apres un delai).
+   - "Rejoindre" -> on ouvre le groupe et on arrete de demander. */
+function waInviteStatus(){ try{ return localStorage.getItem('snk_wa')||''; }catch{ return ''; } }
+function waSnoozeUntil(){ try{ return parseInt(localStorage.getItem('snk_wa_snooze')||'0'); }catch{ return 0; } }
+function maybeShowWhatsappInvite(){
+  const st = waInviteStatus();
+  if(st==='member' || st==='joined') return;          // deja membre -> jamais
+  if(Date.now() < waSnoozeUntil()) return;             // en pause (refus recent)
+  if(document.getElementById('waInvite')) return;
+  const g=document.createElement('div'); g.id='waInvite'; g.className='wa-invite';
+  g.innerHTML=`<div class="wa-card">
+    <div class="wa-emoji">🦊💬</div>
+    <h3>Rejoins la communauté Shinsekai no Kami !</h3>
+    <p>Défis exclusifs, annonces des championnats, fun entre otakus et nouveaux quiz en avant-première… <b>la vraie aventure se vit dans le groupe WhatsApp !</b> 🔥</p>
+    <a class="btn gold" href="${SOCIAL.whatsappGroup}" target="_blank" rel="noopener" onclick="waInviteAction('joined')">🟢 Rejoindre le groupe</a>
+    <button class="btn alt" onclick="waInviteAction('member')">✅ J'y suis déjà</button>
+    <button class="wa-later" onclick="waInviteAction('later')">Plus tard / Non merci</button>
+  </div>`;
+  document.body.appendChild(g);
+}
+function waInviteAction(action){
+  try{
+    if(action==='member'||action==='joined') localStorage.setItem('snk_wa', action);
+    if(action==='later'){ localStorage.setItem('snk_wa_snooze', String(Date.now() + 3*24*3600*1000)); } // re-proposer dans 3 jours
+  }catch{}
+  const g=document.getElementById('waInvite'); if(g) g.remove();
+}
+function socialFollowHtml(){
+  return `<div class="social-follow">
+    <p class="social-title">✨ Suivez Shisnekai no Kami !</p>
+    <div class="social-btns">
+      <a class="social-btn wa" href="${SOCIAL.whatsappGroup}" target="_blank" rel="noopener" onclick="waInviteAction('joined')">💬 Groupe WhatsApp</a>
+      <a class="social-btn ig" href="${SOCIAL.instagram}" target="_blank" rel="noopener">📸 Instagram</a>
+      <a class="social-btn tt" href="${SOCIAL.tiktok}" target="_blank" rel="noopener">🎵 TikTok</a>
+    </div>
+  </div>`;
+}
+/* Suivi de visite (anonyme, 1 id par navigateur) */
+(function trackVisit(){
+  try{
+    let vid = localStorage.getItem('snk_vid');
+    if(!vid){ vid = 'v-'+Math.random().toString(36).slice(2)+Date.now().toString(36); localStorage.setItem('snk_vid', vid); }
+    fetch('/api/visit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({vid}) }).catch(()=>{});
+  }catch(e){}
+})();
+let TOKEN = localStorage.getItem('snk_token') || sessionStorage.getItem('snk_token') || null;
+let ME = null;
+let MASCOTS = [];
+const $ = s => document.querySelector(s);
+const screen = $('#screen');
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- Mascottes ---------- */
+async function loadMascots(){ try{ const r=await fetch('/api/mascots'); MASCOTS=(await r.json()).mascots; }catch{ MASCOTS=[]; } }
+function mascotHtml(id, size){ const m=MASCOTS.find(x=>x.id===id)||{emoji:'🦊',c1:'#444',c2:'#111'};
+  return `<span class="mascot ${size||'s'}" style="--m1:${m.c1};--m2:${m.c2}"><span class="em">${m.emoji}</span></span>`; }
+
+/* ---------- Media (image/audio) dans le jeu ---------- */
+function mediaHtml(q, opts){
+  opts = opts||{};
+  let h='';
+  if(q.image) h += `<div class="game-media"><img src="${q.image}" class="game-img" alt="média de la question"/></div>`;
+  if(q.audio) h += `<div class="game-media"><audio id="qaudio" src="${q.audio}" controls ${opts.autoplay?'autoplay':''} preload="auto" class="game-audio"></audio>
+    <div><button class="btn alt small" onclick="replayAudio()">🔊 Rejouer le son</button></div></div>`;
+  return h;
+}
+function replayAudio(){ const a=document.getElementById('qaudio'); if(a){ a.currentTime=0; a.play().catch(()=>{}); } }
+
+/* ---------- Agent IA : bulle + voix (cote hote) ---------- */
+let voiceOn=true, aiTimer=null;
+function aiShow(text){
+  const a=$('#aiAgent'), b=$('#aiBubble'); if(!a||!b||!text) return;
+  $('#aiToggle').style.display='block';
+  b.textContent=text; a.classList.add('show');
+  clearTimeout(aiTimer); aiTimer=setTimeout(()=>a.classList.remove('show'), 7000);
+  speak(text);
+}
+function speak(text){
+  if(!voiceOn || !('speechSynthesis' in window)) return;
+  try{ speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(text.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/gu,''));
+    u.lang='fr-FR'; u.rate=1.05; u.pitch=1.05;
+    const v=speechSynthesis.getVoices().find(v=>/fr/i.test(v.lang)); if(v) u.voice=v;
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+function toggleVoice(){ voiceOn=!voiceOn; $('#aiToggle').textContent=voiceOn?'🔊 Voix : ON':'🔇 Voix : OFF'; if(!voiceOn&&'speechSynthesis'in window) speechSynthesis.cancel(); }
+
+/* ---------- Son (Web Audio) ---------- */
+function refreshSoundBtn(){ const b=$('#soundToggle'); if(b&&window.SNKSound){ b.style.display='block'; b.textContent=SNKSound.isEnabled()?'🎵 Son : ON':'🔇 Son : OFF'; } }
+function toggleSound(){ if(!window.SNKSound) return; SNKSound.unlock(); SNKSound.setEnabled(!SNKSound.isEnabled()); SNKSound.click(); refreshSoundBtn(); }
+// Debloque l'audio au premier clic (politique navigateur)
+document.addEventListener('click', ()=>{ if(window.SNKSound) SNKSound.unlock(); }, { once:true });
+window.addEventListener('load', refreshSoundBtn);
+
+/* ---------- API ---------- */
+async function api(path, method='GET', body){
+  const opt = { method, headers:{ 'Content-Type':'application/json' } };
+  if(TOKEN) opt.headers['Authorization'] = 'Bearer ' + TOKEN;
+  if(body) opt.body = JSON.stringify(body);
+  const res = await fetch('/api'+path, opt);
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || 'Erreur serveur');
+  return data;
+}
+
+/* ---------- Header ---------- */
+function roleBadge(role){
+  if(role==='superadmin') return '<span class="role-badge superadmin">👑 SUPER-ADMIN</span>';
+  if(role==='admin') return '<span class="role-badge admin">🛡️ ADMIN</span>';
+  return '';
+}
+function renderHeader(){
+  const box = $('#userbox');
+  if(ME){
+    box.innerHTML = `<span class="uname">${esc(ME.username)}</span>
+      ${roleBadge(ME.role)}
+      <button class="btn alt small" onclick="logout()">Déconnexion</button>`;
+  } else box.innerHTML='';
+}
+function showMsg(id,txt,ok){ const el=$('#'+id); if(!el)return; el.textContent=txt; el.className='msg '+(ok?'ok':'err'); el.style.display='block'; }
+
+/* ===================== AUTH ===================== */
+function viewLogin(){
+  renderHeader();
+  screen.innerHTML=`
+  <div class="card">
+    <div class="landing-logo">
+      <img src="snk-mask.png" alt="Shisnekai no Kami" class="mask-logo"/>
+      <div class="landing-title">Shisnekai <span>no Kami</span></div>
+      <div class="landing-sub">神 · QUIZ DES ESPRITS</div>
+    </div>
+    <div class="msg err" id="m"></div>
+    <label>Nom d'utilisateur</label><input id="lu" autocomplete="username"/>
+    <label>Mot de passe</label><input id="lp" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/>
+    <label class="remember-row"><input type="checkbox" id="lr" checked/> <span>Se souvenir de moi</span></label>
+    <div class="mt"><button class="btn" onclick="doLogin()">Se connecter</button></div>
+    <div class="switchlink">Pas de compte ? <a onclick="viewRegister()">Créer un compte</a> · <a onclick="viewRecover()">Mot de passe oublié ?</a></div>
+    <p class="hint center mt">📱 Les joueurs rejoignent via <b>/play</b></p>
+    <div class="mt"><a class="btn ghost" href="/play">Je suis un joueur → rejoindre une partie</a></div>
+
+    <a class="dev-card" href="https://wa.me/13439987628" target="_blank" rel="noopener">
+      <img class="dev-logo" src="ak-emblem.png" alt="Adonai Kabongo"/>
+      <div class="dev-info">
+        <div class="dev-role">Conçu &amp; développé par</div>
+        <div class="dev-name">Adonai Kabongo</div>
+        <div class="dev-sub">Développeur &amp; Concepteur</div>
+        <span class="dev-contact">🟢 WhatsApp : +1 343 998 7628</span>
+      </div>
+    </a>
+  </div>`;
+}
+
+
+/* ---------- Recuperation de mot de passe (admin/superadmin) ---------- */
+let recoverState = { username:'', questions:[] };
+function viewRecover(){
+  renderHeader();
+  screen.innerHTML=`<div class="card">
+    <span class="back-link" onclick="viewLogin()">← Retour</span>
+    <h2 class="title">Mot de passe <span>oublié</span></h2>
+    <p class="subtitle">Répondez à votre question de sécurité pour réinitialiser.</p>
+    <div class="msg err" id="rm"></div>
+    <label>Nom d'utilisateur du compte</label><input id="ru2" autocomplete="off"/>
+    <div class="mt"><button class="btn" onclick="recoverStep1()">Continuer</button></div>
+  </div>`;
+}
+async function recoverStep1(){
+  const username=$('#ru2').value.trim();
+  try{
+    const d=await api('/recover/questions','POST',{username});
+    recoverState={ username, questions:d.questions };
+    renderHeader();
+    screen.innerHTML=`<div class="card"><span class="back-link" onclick="viewRecover()">← Retour</span>
+      <h2 class="title">Question(s) de <span>sécurité</span></h2>
+      <p class="subtitle">Répondez pour récupérer le compte <b>${esc(username)}</b>.</p>
+      <div class="msg err" id="rm"></div>
+      ${recoverState.questions.map((q,i)=>`<label>${esc(q)}</label><input id="ra${i}" autocomplete="off"/>`).join('')}
+      <label>Nouveau mot de passe</label><input id="rnp" type="password"/>
+      <div class="mt"><button class="btn gold" onclick="recoverStep2()">Réinitialiser le mot de passe</button></div>
+    </div>`;
+  }catch(e){ showMsg('rm', e.message); }
+}
+async function recoverStep2(){
+  const answers=recoverState.questions.map((_,i)=>$('#ra'+i).value);
+  const newPassword=$('#rnp').value;
+  try{
+    await api('/recover/reset','POST',{ username:recoverState.username, answers, newPassword });
+    renderHeader();
+    screen.innerHTML=`<div class="card center"><h2 class="title">✔ <span>Réinitialisé</span></h2>
+      <p class="subtitle">Votre mot de passe a été modifié.</p>
+      <div class="mt"><button class="btn" onclick="viewLogin()">Se connecter</button></div></div>`;
+  }catch(e){ showMsg('rm', e.message); }
+}
+
+async function doLogin(){
+  try{
+    const remember = $('#lr') ? $('#lr').checked : true;
+    const d = await api('/login','POST',{ username:$('#lu').value.trim(), password:$('#lp').value, remember });
+    TOKEN=d.token; ME=d.user;
+    // 'Se souvenir de moi' : localStorage (persiste) sinon sessionStorage (efface a la fermeture)
+    if(remember){ localStorage.setItem('snk_token',TOKEN); sessionStorage.removeItem('snk_token'); }
+    else { sessionStorage.setItem('snk_token',TOKEN); localStorage.removeItem('snk_token'); }
+    viewDashboard();
+  }catch(e){ showMsg('m', e.message); }
+}
+function viewRegister(){
+  renderHeader();
+  screen.innerHTML=`
+  <div class="card">
+    <span class="back-link" onclick="viewLogin()">← Retour</span>
+    <h2 class="title">Créer un compte <span>神</span></h2>
+    <p class="subtitle">Créez et animez vos propres quiz.</p>
+    <div class="msg err" id="m"></div>
+    <label>Nom d'utilisateur</label><input id="ru" autocomplete="off"/>
+    <label>Mot de passe</label><input id="rp" type="password"/>
+    <label>Confirmer le mot de passe</label><input id="rp2" type="password"/>
+    <input id="rweb" name="website" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px;opacity:0" aria-hidden="true"/>
+    <div class="mt"><button class="btn" onclick="doRegister()">S'inscrire</button></div>
+    <div class="switchlink">Déjà un compte ? <a onclick="viewLogin()">Se connecter</a></div>
+  </div>`;
+  regFormTs = Date.now(); // anti-bot : horodatage d'affichage du formulaire
+}
+let regFormTs = 0;
+async function doRegister(){
+  const p=$('#rp').value, p2=$('#rp2').value;
+  if(p!==p2){ showMsg('m','Les mots de passe ne correspondent pas.'); return; }
+  try{
+    const d = await api('/register','POST',{ username:$('#ru').value.trim(), password:p,
+      website: $('#rweb')?$('#rweb').value:'', formTs: regFormTs });
+    TOKEN=d.token; localStorage.setItem('snk_token',TOKEN); sessionStorage.removeItem('snk_token'); ME=d.user; viewDashboard();
+  }catch(e){ showMsg('m', e.message); }
+}
+async function logout(){ try{ await api('/logout','POST'); }catch{} if(window.SNKSound){ SNKSound.lobby(false); SNKSound.tickStop(); } TOKEN=null; ME=null; localStorage.removeItem('snk_token'); sessionStorage.removeItem('snk_token'); viewLogin(); }
+
+/* ===================== DASHBOARD ===================== */
+function viewDashboard(){
+  renderHeader();
+  setTimeout(maybeShowWhatsappInvite, 1200); // invitation groupe WhatsApp (non intrusive)
+  const isAdminish = (ME.role==='admin'||ME.role==='superadmin');
+  screen.innerHTML=`
+  <div class="card wide">
+    <h2 class="title">Bienvenue, <span>${esc(ME.username)}</span> ${roleBadge(ME.role)}</h2>
+    <p class="subtitle">Affrontez le Kami, entraînez-vous, ou animez une partie.</p>
+    <div class="menu-grid">
+      <div class="menu-tile" onclick="viewChampionship()"><div class="ico">🏆</div><h3>Championnat Shinsekai</h3><p>20 journées · classement</p></div>
+      <div class="menu-tile" onclick="viewLiveRooms()"><div class="ico">👁️</div><h3>Regarder un duel</h3><p>Spectateur + chat live</p></div>
+      <div class="menu-tile" onclick="viewVersusSetup()"><div class="ico">⚔️</div><h3>Versus — 1v1 IA</h3><p>Affrontez l'agent Kami</p></div>
+      <div class="menu-tile" onclick="viewRaceHost()"><div class="ico">🏁</div><h3>Course Kami (buzzer)</h3><p>L'animateur pose, le + rapide gagne</p></div>
+      <div class="menu-tile" onclick="viewDuelSetup()"><div class="ico">🆚</div><h3>Duel 1v1</h3><p>Défie un ami via un PIN</p></div>
+      <div class="menu-tile" onclick="viewSoloSetup()"><div class="ico">🎯</div><h3>Solo entraînement</h3><p>10 questions générées</p></div>
+      <div class="menu-tile" onclick="viewMyQuizzes()"><div class="ico">📝</div><h3>Mes quiz</h3><p>Créer, modifier, lancer</p></div>
+      <div class="menu-tile" onclick="viewHistory()"><div class="ico">📊</div><h3>Classements</h3><p>Résultats des parties</p></div>
+      <div class="menu-tile" onclick="location.href='/play'"><div class="ico">🎮</div><h3>Rejoindre</h3><p>Page joueur (PIN)</p></div>
+      <div class="menu-tile" onclick="${isAdminish?'viewAdmin()':'viewMyQuizzes()'}">
+        <div class="ico">${isAdminish?'🛡️':'🦊'}</div>
+        <h3>${isAdminish?'Administration':'Nouveau quiz'}</h3>
+        <p>${isAdminish?'Comptes, rôles, bans, code':'Créer un quiz'}</p></div>
+    </div>
+    <div class="row mt center" style="justify-content:center;flex-wrap:wrap">
+      <button class="btn alt small" style="flex:0" onclick="viewChangePassword()">🔑 Changer mon mot de passe</button>
+      <button class="btn alt small" style="flex:0" onclick="viewSecurityQuestions()">🔐 Question de sécurité ${ME.hasSecurityQuestions?'✔':'⚠️'}</button>
+    </div>
+    <div class="dev-footer">
+      <img src="ak-emblem.png" alt="AK"/>
+      <span class="hint">Conçu par <a href="https://wa.me/13439987628" target="_blank" rel="noopener">Adonai Kabongo</a></span>
+    </div>
+  </div>`;
+}
+
+/* ===================== QUESTIONS DE SECURITE (admin/superadmin) ===================== */
+function viewSecurityQuestions(){
+  renderHeader();
+  screen.innerHTML=`<div class="card"><span class="back-link" onclick="viewDashboard()">← Retour</span>
+    <h2 class="title">Questions de <span>sécurité</span></h2>
+    <p class="subtitle">Sert à récupérer votre mot de passe sans email. <b>Une seule question suffit.</b> ${ME.hasSecurityQuestions?'<b style="color:#9af0b0">(déjà configurée)</b>':'<b style="color:#ffce6b">(non configurée)</b>'}</p>
+    <div class="msg" id="sqm"></div>
+    <label>Question 1 <span style="color:#ff9a9a">(obligatoire)</span></label><input id="sq0" value="Quel est le prénom de ta mère ?"/>
+    <label>Réponse 1</label><input id="sa0" autocomplete="off"/>
+    <label>Question 2 <span class="hint">(optionnel)</span></label><input id="sq1" value=""/>
+    <label>Réponse 2</label><input id="sa1" autocomplete="off"/>
+    <label>Question 3 <span class="hint">(optionnel)</span></label><input id="sq2" value=""/>
+    <label>Réponse 3</label><input id="sa2" autocomplete="off"/>
+    <div class="mt"><button class="btn gold" onclick="saveSecurityQuestions()">💾 Enregistrer</button></div>
+    <p class="hint mt">Les réponses sont stockées hashées (scrypt). Insensible à la casse.</p>
+  </div>`;
+}
+async function saveSecurityQuestions(){
+  const questions=[0,1,2].map(i=>({ question:$('#sq'+i).value.trim(), answer:$('#sa'+i).value.trim() }));
+  try{ await api('/security-questions','POST',{questions});
+    ME.hasSecurityQuestions=true;
+    const m=$('#sqm'); m.className='msg ok'; m.style.display='block'; m.textContent='Questions enregistrées ✔';
+    setTimeout(viewDashboard,900);
+  }catch(e){ const m=$('#sqm'); m.className='msg err'; m.style.display='block'; m.textContent=e.message; }
+}
+function viewChangePassword(){
+  renderHeader();
+  screen.innerHTML=`<div class="card"><span class="back-link" onclick="viewDashboard()">← Retour</span>
+    <h2 class="title">Changer le <span>mot de passe</span></h2>
+    <div class="msg" id="cpm"></div>
+    <label>Mot de passe actuel</label><input id="cpo" type="password"/>
+    <label>Nouveau mot de passe</label><input id="cpn" type="password"/>
+    <label>Confirmer le nouveau</label><input id="cpn2" type="password"/>
+    <div class="mt"><button class="btn gold" onclick="doChangePassword()">Enregistrer</button></div></div>`;
+}
+async function doChangePassword(){
+  const o=$('#cpo').value,n=$('#cpn').value,n2=$('#cpn2').value;
+  const m=$('#cpm');
+  if(n!==n2){ m.className='msg err';m.style.display='block';m.textContent='Les nouveaux mots de passe ne correspondent pas.'; return; }
+  try{ await api('/change-password','POST',{oldPassword:o,newPassword:n});
+    m.className='msg ok';m.style.display='block';m.textContent='Mot de passe modifié ✔';
+    setTimeout(viewDashboard,900);
+  }catch(e){ m.className='msg err';m.style.display='block';m.textContent=e.message; }
+}
+
+/* ===================== MES QUIZ ===================== */
+async function viewMyQuizzes(){
+  renderHeader();
+  screen.innerHTML=`<div class="card wide"><span class="back-link" onclick="viewDashboard()">← Retour</span>
+    <h2 class="title">Mes <span>quiz</span></h2>
+    <p class="subtitle">${ME.role==='admin'?'Tous les quiz (admin)':'Vos quiz'}</p>
+    <button class="btn" onclick="viewEditQuiz()">＋ Créer un nouveau quiz</button>
+    <div class="mt" id="qlist">Chargement…</div></div>`;
+  try{
+    const d = await api('/quizzes');
+    const list=$('#qlist');
+    if(!d.quizzes.length){ list.innerHTML='<p class="hint center">Aucun quiz. Créez-en un !</p>'; return; }
+    list.innerHTML = d.quizzes.map(q=>`
+      <div class="quiz-item">
+        <div><h4>${esc(q.title)}</h4><p>${q.questions.length} question(s) · ${esc(q.ownerName)} ${q.id==='demo-quiz'?'<span class="pill">DÉMO</span>':''}</p></div>
+        <div class="acts">
+          <button class="btn gold small" onclick="viewLaunchOptions('${q.id}')">▶ Lancer</button>
+          <button class="btn alt small" onclick="viewEditQuiz('${q.id}')">Modifier</button>
+          <button class="btn danger small" onclick="deleteQuiz('${q.id}')">Suppr.</button>
+        </div></div>`).join('');
+  }catch(e){ $('#qlist').innerHTML='<p class="msg err" style="display:block">'+esc(e.message)+'</p>'; }
+}
+async function deleteQuiz(id){ if(!confirm('Supprimer ce quiz ?'))return; try{ await api('/quizzes/'+id,'DELETE'); viewMyQuizzes(); }catch(e){ alert(e.message);} }
+
+/* ===================== EDITEUR ===================== */
+let editorState=null, editorQuizzes=[];
+async function viewEditQuiz(id){
+  renderHeader();
+  if(id){ const d=await api('/quizzes'); const q=d.quizzes.find(x=>x.id===id);
+    editorState = q ? JSON.parse(JSON.stringify(q)) : null; }
+  if(!editorState || !id) editorState = { id:null, title:'', description:'', questions:[ newQuestion('qcm') ] };
+  renderEditor();
+}
+function newQuestion(type){
+  if(type==='tf') return {type:'tf',text:'',time:15,options:['Vrai','Faux'],correct:[0]};
+  return {type:'qcm',text:'',time:20,options:['','','',''],correct:[0]};
+}
+function renderEditor(){
+  const s=editorState;
+  screen.innerHTML=`<div class="card wide"><span class="back-link" onclick="viewMyQuizzes()">← Retour</span>
+    <h2 class="title">Éditeur de <span>quiz</span></h2>
+    <div class="msg" id="em"></div>
+    <label>Titre</label><input id="qtitle" value="${esc(s.title)}" placeholder="Ex : Culture japonaise"/>
+    <label>Description (optionnel)</label><textarea id="qdesc">${esc(s.description)}</textarea>
+    <div class="toggle-relaxe" style="margin-top:14px">
+      <input type="checkbox" id="iaShared" ${s.iaShared?'checked':''} onchange="editorState.iaShared=this.checked"/>
+      <label for="iaShared" style="margin:0">🧩 Partager mes questions QCM dans les modes <b>Versus & Solo IA</b>
+        <span class="hint" style="display:block">Vos questions QCM (min. 4) deviendront un thème jouable contre le Kami par toute la communauté.</span></label>
+    </div>
+    <div id="questions" class="mt"></div>
+    <div class="row mt"><button class="btn alt" onclick="addQuestion('qcm')">＋ QCM</button>
+      <button class="btn alt" onclick="addQuestion('tf')">＋ Vrai / Faux</button></div>
+    <div class="mt"><button class="btn gold" onclick="saveQuiz()">💾 Enregistrer</button></div></div>`;
+  renderQuestions();
+}
+function renderQuestions(){
+  syncMeta();
+  const colors=['#d11414','#2b6bd1','#e8b400','#26b34a'], symbols=['▲','◆','●','■'];
+  $('#questions').innerHTML = editorState.questions.map((q,i)=>{
+    const opts=q.options.map((opt,oi)=>`<div class="opt-row">
+      <span class="colortag" style="background:${colors[oi]}"></span>
+      ${q.type==='tf'?`<input type="text" value="${esc(opt)}" disabled style="flex:1"/>`
+        :`<input type="text" value="${esc(opt)}" placeholder="Réponse ${oi+1}" oninput="updOpt(${i},${oi},this.value)"/>`}
+      <input type="radio" name="c-${i}" ${q.correct.includes(oi)?'checked':''} onchange="setCorrect(${i},${oi})"/>
+      <label class="correct">bonne</label></div>`).join('');
+    return `<div class="q-editor"><div class="q-head">
+      <strong>Question ${i+1} — ${q.type==='tf'?'Vrai/Faux':'QCM'}</strong>
+      <div><select onchange="setTime(${i},this.value)" style="width:auto;display:inline-block;padding:6px 8px;">
+        ${[10,15,20,30,45,60].map(t=>`<option value="${t}" ${q.time===t?'selected':''}>${t}s</option>`).join('')}
+      </select>
+      <button class="btn danger small" onclick="delQuestion(${i})" ${editorState.questions.length<=1?'disabled':''}>✕</button></div></div>
+      <input type="text" value="${esc(q.text)}" placeholder="Énoncé…" oninput="updText(${i},this.value)"/>
+      <div class="media-box">
+        <div class="media-controls">
+          <label class="media-btn">🖼️ ${q.image?'Changer l\'image':'Importer une image'}
+            <input type="file" accept="image/*" style="display:none" onchange="importImage(${i},this)"/></label>
+          ${q.image?`<button class="btn danger small" onclick="removeMedia(${i},'image')">✕ Image</button>`:''}
+          <label class="media-btn">🎵 ${q.audio?'Changer l\'audio':'Importer un audio'}
+            <input type="file" accept="audio/*" style="display:none" onchange="importAudio(${i},this)"/></label>
+          ${q.audio?`<button class="btn danger small" onclick="removeMedia(${i},'audio')">✕ Audio</button>`:''}
+        </div>
+        <div class="media-preview">
+          ${q.image?`<img src="${q.image}" class="media-thumb" alt="aperçu"/>`:''}
+          ${q.audio?`<audio src="${q.audio}" controls preload="metadata" class="media-audio"></audio>`:''}
+        </div>
+        <p class="hint" style="margin-top:4px">💡 Pour « Quel est ce son ? » : importez un audio (l'image peut rester vide).</p>
+      </div>
+      <div class="mt">${opts}</div></div>`;
+  }).join('');
+}
+
+/* ---------- Import de medias (compression image + limites) ---------- */
+const MAX_IMG_BYTES = 2*1024*1024;    // 2 Mo apres compression
+const MAX_AUDIO_BYTES = 6*1024*1024;  // 6 Mo
+function readFileAsDataURL(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); }); }
+function dataUrlBytes(d){ const i=d.indexOf(','); return Math.floor((d.length-i-1)*3/4); }
+
+async function importImage(i, input){
+  const file=input.files[0]; if(!file) return;
+  try{
+    const dataUrl = await readFileAsDataURL(file);
+    const compressed = await compressImage(dataUrl, 1280, 0.82);
+    if(dataUrlBytes(compressed) > MAX_IMG_BYTES){
+      const more = await compressImage(dataUrl, 1000, 0.7);
+      editorState.questions[i].image = more;
+    } else {
+      editorState.questions[i].image = compressed;
+    }
+    renderQuestions();
+    toast('Image importée ✔');
+  }catch(e){ alert('Impossible de lire cette image.'); }
+}
+function compressImage(dataUrl, maxDim, quality){
+  return new Promise((res)=>{
+    const img=new Image();
+    img.onload=()=>{
+      let {width,height}=img;
+      if(width>maxDim || height>maxDim){ const r=Math.min(maxDim/width, maxDim/height); width=Math.round(width*r); height=Math.round(height*r); }
+      const cv=document.createElement('canvas'); cv.width=width; cv.height=height;
+      const ctx=cv.getContext('2d'); ctx.drawImage(img,0,0,width,height);
+      res(cv.toDataURL('image/jpeg', quality));
+    };
+    img.onerror=()=>res(dataUrl);
+    img.src=dataUrl;
+  });
+}
+async function importAudio(i, input){
+  const file=input.files[0]; if(!file) return;
+  if(file.size > MAX_AUDIO_BYTES){ alert('Audio trop volumineux ('+(file.size/1048576).toFixed(1)+' Mo). Maximum '+(MAX_AUDIO_BYTES/1048576)+' Mo.\\nAstuce : raccourcissez le son ou réduisez la qualité.'); input.value=''; return; }
+  try{ editorState.questions[i].audio = await readFileAsDataURL(file); renderQuestions(); toast('Audio importé ✔'); }
+  catch(e){ alert('Impossible de lire cet audio.'); }
+}
+function removeMedia(i, kind){ delete editorState.questions[i][kind]; renderQuestions(); }
+function syncMeta(){ if($('#qtitle')) editorState.title=$('#qtitle').value; if($('#qdesc')) editorState.description=$('#qdesc').value; }
+function addQuestion(t){ syncMeta(); editorState.questions.push(newQuestion(t)); renderQuestions(); }
+function delQuestion(i){ editorState.questions.splice(i,1); renderQuestions(); }
+function updText(i,v){ editorState.questions[i].text=v; }
+function updOpt(i,o,v){ editorState.questions[i].options[o]=v; }
+function setCorrect(i,o){ editorState.questions[i].correct=[o]; }
+function setTime(i,v){ editorState.questions[i].time=parseInt(v); }
+async function saveQuiz(){
+  syncMeta(); const s=editorState;
+  if(!s.title.trim()){ showMsg('em','Donnez un titre.'); return; }
+  for(let i=0;i<s.questions.length;i++){ const q=s.questions[i];
+    if(!q.text.trim()){ showMsg('em','La question '+(i+1)+' est vide.'); return; }
+    if(q.type==='qcm' && q.options.filter(o=>o.trim()).length<2){ showMsg('em','Question '+(i+1)+' : min 2 réponses.'); return; }
+  }
+  s.questions.forEach(q=>{ if(q.type==='qcm'){ const keep=[],nc=[];
+    q.options.forEach((o,oi)=>{ if(o.trim()){ if(q.correct.includes(oi)) nc.push(keep.length); keep.push(o);} });
+    q.options=keep; q.correct=nc.length?nc:[0]; } });
+  try{ await api('/quizzes','POST',s); showMsg('em','Quiz enregistré ✔', true); setTimeout(viewMyQuizzes,700); }
+  catch(e){ showMsg('em', e.message); }
+}
+
+/* ===================== MODES IA : VERSUS & SOLO (REST, sans WebSocket) ===================== */
+let iaOptions = null;
+async function loadIaOptions(){ iaOptions = await api('/ia/options'); return iaOptions; } // toujours rafraichi (themes communautaires)
+let iaSetup = { theme:'mangas_animes', difficulte:'moyen', relaxe:false };
+
+const DIFF_ICONS = { facile:'🟢', moyen:'🟡', difficile:'🔴' };
+
+async function viewVersusSetup(){ await iaSetupView('versus'); }
+async function viewSoloSetup(){ await iaSetupView('solo'); }
+
+async function iaSetupView(mode){
+  renderHeader();
+  await loadIaOptions();
+  iaSetup = { theme:iaOptions.themes[0].id, difficulte:'moyen', relaxe:false };
+  const isVersus = mode==='versus';
+  const community = iaOptions.community || [];
+  screen.innerHTML=`<div class="card"><span class="back-link" onclick="viewDashboard()">← Retour</span>
+    <h2 class="title">${isVersus?'⚔️ Versus — <span>1v1 IA</span>':'🎯 Solo <span>entraînement</span>'}</h2>
+    <p class="subtitle">${isVersus?'Affrontez l\'agent Kami sur 10 questions générées.':'10 questions générées pour vous entraîner.'}</p>
+    <label>Thème</label>
+    <div class="theme-pick" id="themePick">${iaOptions.themes.map(t=>`
+      <div class="pick-card ${t.id===iaSetup.theme?'sel':''}" data-t="${t.id}" onclick="pickTheme('${t.id}')">
+        <div class="ic">${t.emoji}</div><div class="nm">${esc(t.name)}</div></div>`).join('')}</div>
+    ${community.length?`<label class="mt">🧩 Thèmes de la communauté</label>
+    <div class="theme-pick" id="commPick">${community.map(t=>`
+      <div class="pick-card ${t.id===iaSetup.theme?'sel':''}" data-t="${t.id}" onclick="pickTheme('${t.id}')">
+        <div class="ic">${t.emoji}</div><div class="nm">${esc(t.name)}</div>
+        <p class="hint">par ${esc(t.author)} · ${t.count} Q</p></div>`).join('')}</div>`:''}
+    <label class="mt">Difficulté</label>
+    <div class="diff-pick" id="diffPick">${iaOptions.difficulties.map(d=>`
+      <div class="pick-card ${d.id===iaSetup.difficulte?'sel':''}" data-d="${d.id}" onclick="pickDiff('${d.id}')">
+        <div class="ic">${DIFF_ICONS[d.id]||'⚪'}</div><div class="nm">${esc(d.name)}</div>
+        ${isVersus?`<p class="hint">Kami : ${Math.round(d.proba*100)}%</p>`:''}</div>`).join('')}</div>
+    ${!isVersus?`<div class="toggle-relaxe">
+      <input type="checkbox" id="relaxe" onchange="iaSetup.relaxe=this.checked"/>
+      <label for="relaxe" style="margin:0">🧘 Mode relaxe (sans décompte de temps)</label></div>`:''}
+    <div class="mt"><button class="btn gold" onclick="${isVersus?'startVersus()':'startSolo()'}">${isVersus?'⚔️ Affronter Kami':'🎯 Commencer'}</button></div>
+  </div>`;
+}
+function pickTheme(id){ iaSetup.theme=id; document.querySelectorAll('#themePick .pick-card, #commPick .pick-card').forEach(c=>c.classList.toggle('sel',c.dataset.t===id)); }
+function pickDiff(id){ iaSetup.difficulte=id; document.querySelectorAll('#diffPick .pick-card').forEach(c=>c.classList.toggle('sel',c.dataset.d===id)); }
+
+/* ---------- VERSUS ---------- */
+let vs = null;
+async function startVersus(){
+  try{
+    const d = await api('/ia/versus/start','POST',{ theme:iaSetup.theme, difficulte:iaSetup.difficulte });
+    vs = { ...d, qi:0, myScore:0, myGood:0, kamiScore:0, kamiRevealed:false };
+    versusQuestion();
+  }catch(e){ alert(e.message); }
+}
+/* ---------- Provocations & répliques de Kami (interactif, hors-ligne) ---------- */
+const KAMI_TAUNT = {
+  start:["Hehe... tu oses me défier, mortel ? 🦊","Montre-moi ce que tu vaux. 😼","Le Kami ne perd jamais... ou presque. 😏","Prépare-toi à souffrir, esprit téméraire ! 🔥"],
+  kamiCorrectFirst:["Trop lent ! J'ai déjà répondu. 😎","Hehe, l'esprit voit tout. ✨","Je n'ai même pas réfléchi. 🦊"],
+  kamiWrong:["Hein ?! Ça n'arrivera plus. 😤","Tss... une erreur de calcul.","Tu as eu de la chance, là. 😒"],
+  youCorrect:["Pas mal... pour un humain. 😏","Hmm, tu m'impressionnes presque.","Bien joué, mais ça ne suffira pas ! 🔥"],
+  youWrong:["HAHA ! Le Kami jubile. 😈","Aïe... tu t'es trompé. 🦊","Trop facile pour moi. 😼"],
+  youLead:["Tu mènes ?! Impossible... 😱","Profite, ça ne durera pas. 😤","Le Kami va contre-attaquer ! ⚡"],
+  kamiLead:["Je domine, comme prévu. 👑","Tu vois l'écart ? 😎","Abandonne tant qu'il est temps. 🐉"],
+  combo:["🔥 Série ! Tu t'enflammes !","Combo ! Impressionnant... 😮","Tu es en feu ! Continue ! ⚡"],
+  close:["C'est serré... je n'aime pas ça. 😰","À un cheveu ! Concentre-toi.","Tout se joue maintenant ! ⚔️"]
+};
+function kamiSay(text, mood){ aiShow(text); if(window.SNKSound && mood==='bad') {} }
+
+function versusQuestion(){
+  const q = vs.questions[vs.qi];
+  const colors=['a0','a1','a2','a3'], sym=['▲','◆','●','■'];
+  if(vs.combo===undefined){ vs.combo=0; }
+  renderHeader();
+  screen.innerHTML=`<div class="card wide">
+    <span class="back-link" onclick="quitIaGame()">✕ Abandonner</span>
+    <div class="vs-wrap">
+      <div class="vs-side me ${vs.myScore>=vs.kamiScore?'lead':''}" id="vsMe">
+        <div class="vs-ava">🧑</div><div class="vs-name">Vous ${vs.combo>=2?'<span class="combo-badge">🔥x'+vs.combo+'</span>':''}</div><div class="vs-score" id="myScore">${vs.myScore}</div></div>
+      <div class="vs-mid"><div class="vs-clash" id="vsClash">⚔️</div></div>
+      <div class="vs-side kami ${vs.kamiScore>vs.myScore?'lead':''}" id="vsKami">
+        <div class="vs-ava" id="kamiAva">🦊</div><div class="vs-name">Kami</div><div class="vs-score" id="kamiScore">${vs.kamiScore}</div>
+        <div class="kami-thinking" id="kamiThink"></div></div>
+    </div>
+    <div class="momentum"><div class="momentum-fill" id="momentumFill"></div><span class="momentum-mid"></span></div>
+    <div class="qmeta"><span>Question ${vs.qi+1} / ${vs.questions.length}</span><span><b id="tleft">${q.time}</b>s</span></div>
+    <div class="timer-bar"><div class="timer-fill" id="tfill" style="width:100%"></div></div>
+    <div class="qbig">${esc(q.text)}</div>
+    ${mediaHtml(q, {autoplay:true})}
+    <div class="answer-grid">${q.options.map((o,i)=>`<button class="answer-btn ${colors[i]}" id="vopt${i}" onclick="versusAnswer(${i})"><span class="sym">${sym[i]}</span> ${esc(o)}</button>`).join('')}</div>
+  </div>`;
+  updateMomentum();
+  // petite provocation de Kami a la 1ere question et a mi-parcours
+  if(vs.qi===0) setTimeout(()=>kamiSay(pickArr(KAMI_TAUNT.start)), 300);
+  else if(vs.qi===Math.floor(vs.questions.length/2)){
+    const diff=vs.myScore-vs.kamiScore;
+    setTimeout(()=>kamiSay(pickArr(Math.abs(diff)<300?KAMI_TAUNT.close : diff>0?KAMI_TAUNT.youLead:KAMI_TAUNT.kamiLead)),300);
+  }
+  // clash visuel
+  const clash=$('#vsClash'); if(clash){ clash.classList.remove('go'); void clash.offsetWidth; clash.classList.add('go'); }
+  vs.qStart=Date.now(); vs.answered=false;
+  const plan = vs.kamiPlan[vs.qi];
+  $('#kamiThink').textContent='réfléchit…';
+  if($('#kamiAva')) $('#kamiAva').classList.add('thinking');
+  vs.kamiTimeout = setTimeout(()=>{ if(!vs.answered) kamiAnswers(true); }, plan.tResp*1000);
+  let t=q.time;
+  if(window.SNKSound) SNKSound.tickStart(q.time);
+  if(window._vtimer) clearInterval(window._vtimer);
+  window._vtimer=setInterval(()=>{ t--; if($('#tleft'))$('#tleft').textContent=Math.max(0,t);
+    if($('#tfill'))$('#tfill').style.width=(Math.max(0,t)/q.time*100)+'%';
+    if(t<=0){ clearInterval(window._vtimer); if(!vs.answered) versusAnswer(-1); } },1000);
+}
+function pickArr(a){ return a[Math.floor(Math.random()*a.length)]; }
+/* Quitter une partie IA (versus/solo) en cours, avec confirmation */
+function quitIaGame(){
+  if(!confirm('Abandonner la partie en cours et revenir à l accueil ?')) return;
+  if(window._vtimer) clearInterval(window._vtimer);
+  if(window._stimer) clearInterval(window._stimer);
+  if(vs && vs.kamiTimeout) clearTimeout(vs.kamiTimeout);
+  if(window.SNKSound){ SNKSound.tickStop(); SNKSound.lobby(false); }
+  vs=null; solo=null;
+  viewDashboard();
+}
+function updateMomentum(){
+  const f=$('#momentumFill'); if(!f) return;
+  const total=Math.max(1, vs.myScore+vs.kamiScore);
+  const myPct = (vs.myScore+vs.kamiScore===0)?50 : Math.round(vs.myScore/total*100);
+  f.style.width=myPct+'%';
+}
+function kamiAnswers(firstToAnswer){
+  const plan=vs.kamiPlan[vs.qi]; const q=vs.questions[vs.qi];
+  const ratio=Math.max(0,(q.time-plan.tResp)/q.time);
+  const pts = plan.correct ? Math.round(500+500*ratio) : 0;
+  vs.kamiScore += pts;
+  animateScore('kamiScore', vs.kamiScore);
+  if($('#kamiAva')){ $('#kamiAva').classList.remove('thinking'); $('#kamiAva').textContent = plan.correct?'😎':'😵'; setTimeout(()=>{ if($('#kamiAva'))$('#kamiAva').textContent='🦊'; },1200); }
+  $('#kamiThink').textContent = plan.correct ? `a répondu ✔ (+${pts})` : 'a répondu ✗';
+  if(firstToAnswer){ kamiSay(pickArr(plan.correct?KAMI_TAUNT.kamiCorrectFirst:KAMI_TAUNT.kamiWrong)); }
+  updateVsLead(); updateMomentum();
+}
+function versusAnswer(opt){
+  if(vs.answered) return; vs.answered=true;
+  if(window._vtimer) clearInterval(window._vtimer);
+  if(window.SNKSound) SNKSound.tickStop();
+  const q=vs.questions[vs.qi];
+  const correctIdx = vs.correct[vs.qi];
+  const isCorrect = (opt === correctIdx);
+  const elapsed=(Date.now()-vs.qStart)/1000;
+  const ratio=Math.max(0,(q.time-elapsed)/q.time);
+  let pts = isCorrect ? Math.round(500+500*ratio) : 0;
+  // gestion du combo
+  if(isCorrect){ vs.combo=(vs.combo||0)+1; if(vs.combo>=3){ pts+=200; } vs.myGood++; }
+  else { vs.combo=0; }
+  if(isCorrect){ vs.myScore+=pts; }
+  if(window.SNKSound){ isCorrect ? SNKSound.correct() : SNKSound.wrong(); }
+  animateScore('myScore', vs.myScore);
+  if(isCorrect && vs.combo>=2){ floatReact('🔥'); }
+  document.querySelectorAll('.answer-grid .answer-btn').forEach((b,i)=>{ b.disabled=true;
+    if(i===correctIdx) b.classList.add('correct'); else if(i===opt) b.classList.add('wrong'); });
+  // Kami repond s'il ne l'a pas deja fait (toi plus rapide que lui)
+  let kamiWasFirst = ($('#kamiThink') && $('#kamiThink').textContent!=='réfléchit…');
+  if(!kamiWasFirst){ clearTimeout(vs.kamiTimeout); kamiAnswers(false); }
+  // reaction de Kami a TA reponse
+  setTimeout(()=>{
+    if(vs.combo>=3 && isCorrect) kamiSay(pickArr(KAMI_TAUNT.combo));
+    else kamiSay(pickArr(isCorrect?KAMI_TAUNT.youCorrect:KAMI_TAUNT.youWrong));
+  }, 500);
+  updateVsLead(); updateMomentum();
+  setTimeout(()=>{ vs.qi++; if(vs.qi>=vs.questions.length) finishVersus(); else versusQuestion(); }, 2000);
+}
+function updateVsLead(){
+  const me=$('#vsMe'), ka=$('#vsKami'); if(!me||!ka) return;
+  me.classList.toggle('lead', vs.myScore>=vs.kamiScore);
+  ka.classList.toggle('lead', vs.kamiScore>vs.myScore);
+}
+function animateScore(id,val){ const el=$('#'+id); if(!el) return; el.textContent=val; el.style.transform='scale(1.3)'; el.classList.add('flash'); setTimeout(()=>{el.style.transform='scale(1)'; el.classList.remove('flash');},250); }
+async function finishVersus(){
+  try{
+    const d=await api('/ia/versus/finish','POST',{ sessionId:vs.sessionId, score:vs.myScore, good:vs.myGood });
+    renderHeader();
+    const win=d.outcome==='victoire', tie=d.outcome==='egalite';
+    screen.innerHTML=`<div class="card wide center">
+      <h2 class="title">${win?'🏆 <span>Victoire !</span>':tie?'⚖️ <span>Égalité</span>':'😔 <span>Défaite</span>'}</h2>
+      <div class="vs-wrap">
+        <div class="vs-side me ${d.myScore>=d.kamiScore?'lead':''}"><div class="vs-ava">🧑</div><div class="vs-name">Vous</div><div class="vs-score">${d.myScore}</div></div>
+        <div class="vs-mid">VS</div>
+        <div class="vs-side kami ${d.kamiScore>d.myScore?'lead':''}"><div class="vs-ava">🦊</div><div class="vs-name">Kami</div><div class="vs-score">${d.kamiScore}</div></div>
+      </div>
+      <p class="subtitle" style="font-size:16px">${esc(d.message)}</p>
+      <div class="row mt"><button class="btn" onclick="viewVersusSetup()">Rejouer</button><button class="btn alt" onclick="viewDashboard()">Accueil</button></div>
+      ${socialFollowHtml()}
+    </div>`;
+    aiShow(d.message);
+    if(win) launchConfetti(3000);
+  }catch(e){ alert(e.message); }
+}
+
+/* ---------- SOLO ---------- */
+let solo=null;
+async function startSolo(){
+  try{
+    const d=await api('/ia/solo/start','POST',{ theme:iaSetup.theme, difficulte:iaSetup.difficulte, relaxe:iaSetup.relaxe });
+    solo={ ...d, qi:0, answers:[] };
+    soloQuestion();
+  }catch(e){ alert(e.message); }
+}
+function soloQuestion(){
+  const q=solo.questions[solo.qi];
+  const colors=['a0','a1','a2','a3'], sym=['▲','◆','●','■'];
+  renderHeader();
+  const hasTimer = !solo.relaxe && q.time>0;
+  screen.innerHTML=`<div class="card wide">
+    <span class="back-link" onclick="quitIaGame()">✕ Abandonner</span>
+    <div class="qmeta"><span>Question ${solo.qi+1} / ${solo.questions.length}</span><span>${hasTimer?'<b id="tleft">'+q.time+'</b>s':'🧘 Relaxe'}</span></div>
+    ${hasTimer?'<div class="timer-bar"><div class="timer-fill" id="tfill" style="width:100%"></div></div>':''}
+    <div class="qbig">${esc(q.text)}</div>
+    ${mediaHtml(q, {autoplay:true})}
+    <div class="answer-grid">${q.options.map((o,i)=>`<button class="answer-btn ${colors[i]}" onclick="soloAnswer(${i})"><span class="sym">${sym[i]}</span> ${esc(o)}</button>`).join('')}</div>
+  </div>`;
+  solo.qStart=Date.now(); solo.answered=false;
+  if(hasTimer){ let t=q.time;
+    if(window.SNKSound) SNKSound.tickStart(q.time);
+    if(window._stimer) clearInterval(window._stimer);
+    window._stimer=setInterval(()=>{ t--; if($('#tleft'))$('#tleft').textContent=Math.max(0,t);
+      if($('#tfill'))$('#tfill').style.width=(Math.max(0,t)/q.time*100)+'%';
+      if(t<=0){ clearInterval(window._stimer); if(!solo.answered) soloAnswer(-1); } },1000);
+  }
+}
+function soloAnswer(opt){
+  if(solo.answered) return; solo.answered=true;
+  if(window._stimer) clearInterval(window._stimer);
+  if(window.SNKSound) SNKSound.tickStop();
+  const timeSec=Math.round((Date.now()-solo.qStart)/100)/10;
+  solo.answers[solo.qi]={ opt: opt<0?null:opt, timeSec };
+  const correctIdx = solo.correct ? solo.correct[solo.qi] : null;
+  if(window.SNKSound && correctIdx!=null){ (opt===correctIdx) ? SNKSound.correct() : SNKSound.wrong(); }
+  document.querySelectorAll('.answer-grid .answer-btn').forEach((b,i)=>{ b.disabled=true;
+    if(correctIdx!=null){ if(i===correctIdx) b.classList.add('correct'); else if(i===opt) b.classList.add('wrong'); } });
+  setTimeout(()=>{ solo.qi++; if(solo.qi>=solo.questions.length) finishSolo(); else soloQuestion(); }, correctIdx!=null?1200:500);
+}
+async function finishSolo(){
+  try{
+    const d=await api('/ia/solo/finish','POST',{ sessionId:solo.sessionId, answers:solo.answers });
+    renderHeader();
+    screen.innerHTML=`<div class="card wide center">
+      <h2 class="title">🎯 <span>Récapitulatif</span></h2>
+      <div class="recap-stats">
+        <div class="st"><h3>${d.good}/${d.total}</h3><p>Bonnes réponses</p></div>
+        <div class="st"><h3>${d.pct}%</h3><p>Réussite</p></div>
+        <div class="st"><h3>${d.avgTime!=null?d.avgTime+'s':'—'}</h3><p>Temps moyen</p></div>
+      </div>
+      <p class="subtitle" style="font-size:16px">${esc(d.message)}</p>
+      ${d.missed.length?`<h3 class="mt" style="color:var(--or);text-align:left">Questions ratées</h3>
+        ${d.missed.map(m=>`<div class="recap-missed"><div class="q">${esc(m.question)}</div>
+          <div class="a">Votre réponse : ${esc(m.yourAnswer)}</div>
+          <div class="g">Bonne réponse : ${esc(m.correctAnswer)}</div></div>`).join('')}`
+        :'<p class="hint mt">🎉 Sans faute ! Aucune question ratée.</p>'}
+      <div class="row mt"><button class="btn" onclick="viewSoloSetup()">Rejouer</button><button class="btn alt" onclick="viewDashboard()">Accueil</button></div>
+      ${socialFollowHtml()}
+    </div>`;
+    aiShow(d.message);
+  }catch(e){ alert(e.message); }
+}
+
+/* ===================== CHAMPIONNAT SHINSEKAI ===================== */
+let champCache=null;
+function divName(c,div){ const d=(c.divisions||[]).find(x=>x.id===div); return d?d.name:('Division '+div); }
+function divOptions(sel){ const c=champCache; const divs=(c&&c.divisions)||[{id:1,name:'D1'},{id:2,name:'D2'},{id:3,name:'D3'}];
+  return divs.map(d=>`<option value="${d.id}" ${d.id===sel?'selected':''}>${(d.emoji||'')+' '+d.name}</option>`).join(''); }
+function standingsTable(c, list, div){
+  const N=c.promoRelegate||5; const n=list.length;
+  return `<table class="standings"><tr><th class="pos">#</th><th>Membre</th><th>Pts</th><th>Score cumulé</th><th>J</th><th>V</th></tr>
+    ${list.map(s=>{
+      // marques montee/descente (sauf D1 en haut et D3 en bas)
+      let zone='';
+      if(div>1 && s.rank<=N) zone='zone-up';        // monte
+      if(div<3 && s.rank>n-N) zone='zone-down';     // descend
+      return `<tr class="${s.rank===1?'top1':s.rank===2?'top2':s.rank===3?'top3':''} ${zone}">
+        <td class="pos">${s.rank<=3?['🥇','🥈','🥉'][s.rank-1]:s.rank}${zone==='zone-up'?' ⬆':zone==='zone-down'?' ⬇':''}</td>
+        <td>${mascotHtml(s.mascot,'s')} ${esc(s.name)}</td>
+        <td class="pts">${s.rankPts}</td><td>${s.totalScore}</td><td>${s.played}</td><td>${s.wins}</td></tr>`;
+    }).join('') || '<tr><td colspan="6" class="hint">Aucun membre dans cette division.</td></tr>'}
+  </table>`;
+}
+async function viewChampionship(){
+  renderHeader();
+  screen.innerHTML='<div class="card wide"><span class="back-link" onclick="viewDashboard()">← Retour</span><p class="hint">Chargement du championnat…</p></div>';
+  try{
+    const c = await api('/championship'); champCache=c;
+    const st = c.standings||{};
+    let divBlocks='';
+    (c.divisions||[]).forEach(d=>{
+      const list=st[d.id]||[];
+      divBlocks += `<h3 class="mt" style="color:var(--or)">${d.emoji||''} ${esc(d.name)} <span class="hint">(${list.length})</span></h3>${d.sub?`<p class="hint" style="margin:-4px 0 4px">${esc(d.sub)}</p>`:''}${standingsTable(c,list,d.id)}`;
+    });
+    // pastilles de journees par division jouee
+    const playedSet=new Set((c.days||[]).map(d=>d.division+'-'+d.day));
+    let dayPills='';
+    for(let div=1; div<=3; div++){
+      dayPills += `<div class="hint" style="margin-top:6px">D${div} :</div>`;
+      for(let i=1;i<=c.totalDays;i++){
+        const played=playedSet.has(div+'-'+i);
+        dayPills += `<span class="day-pill ${played?'played':''}" ${played?`onclick="viewChampDay(${div},${i})"`:''}>J${i}${played?' ✔':''}</span>`;
+      }
+    }
+    screen.innerHTML=`<div class="card wide"><span class="back-link" onclick="viewDashboard()">← Retour</span>
+      <div class="champ-hero">
+        <div class="trophy">🏆</div>
+        <div><h2 class="title" style="margin:0">${esc(c.name)}</h2>
+          <p class="subtitle" style="margin:4px 0 0">Saison ${c.season} · <span class="champ-day-badge">Journée ${c.currentDay} / ${c.totalDays}</span> · 3 divisions · ${c.members.length} membre(s)</p></div>
+      </div>
+      <p class="hint">⬆ = monte en fin de saison · ⬇ = descend (${c.promoRelegate} premiers / ${c.promoRelegate} derniers)</p>
+      ${divBlocks}
+      <h3 class="mt" style="color:var(--or)">Journées jouées</h3>
+      <div>${dayPills}</div>
+      ${c.canManage?`<div class="mt"><button class="btn gold" onclick="viewChampManage()">⚙️ Gérer le championnat</button></div>`:''}
+    </div>`;
+  }catch(e){ screen.innerHTML='<div class="card"><p class="msg err" style="display:block">'+esc(e.message)+'</p><span class="back-link" onclick="viewDashboard()">← Retour</span></div>'; }
+}
+async function viewChampDay(div,n){
+  try{
+    const d = await api('/championship/day/'+div+'/'+n);
+    const day=d.day;
+    renderHeader();
+    screen.innerHTML=`<div class="card wide"><span class="back-link" onclick="viewChampionship()">← Retour</span>
+      <h2 class="title">D${div} · Journée ${day.day} — <span>${esc(day.quizTitle)}</span></h2>
+      <table class="standings"><tr><th class="pos">#</th><th>Membre</th><th>Score</th><th>Pts</th></tr>
+      ${day.results.map(r=>`<tr class="${r.dayRank===1?'top1':r.dayRank===2?'top2':r.dayRank===3?'top3':''}">
+        <td class="pos">${r.dayRank<=3?['🥇','🥈','🥉'][r.dayRank-1]:r.dayRank}</td>
+        <td>${esc(r.name)}</td><td>${r.score}</td><td class="pts">+${r.rankPts}</td></tr>`).join('')}
+      </table></div>`;
+  }catch(e){ alert(e.message); }
+}
+let champMembersCache=[];
+async function viewChampManage(){
+  renderHeader();
+  const c = await api('/championship'); champCache=c;
+  champMembersCache=c.members;
+  screen.innerHTML=`<div class="card wide"><span class="back-link" onclick="viewChampionship()">← Retour</span>
+    <h2 class="title">⚙️ Gérer le <span>championnat</span></h2>
+    <div class="msg" id="cmm"></div>
+    <h3 style="color:var(--or)">Ajouter un membre</h3>
+    <div class="row"><input id="newMember" placeholder="Pseudo du membre" style="flex:2"/>
+      <select id="newDiv" style="flex:1">${divOptions(3)}</select>
+      <button class="btn small" style="flex:1" onclick="addChampMember()">＋ Ajouter</button></div>
+    <div class="mt" id="memberList"></div>
+
+    <h3 class="mt" style="color:var(--or)">Saisie manuelle d'une journée (secours)</h3>
+    <p class="hint">Normalement les journées se jouent en live (le score s'enregistre tout seul). Ici c'est juste un secours.</p>
+    <div class="row">
+      <select id="dayDiv" onchange="renderScoreRows()" style="flex:1">${divOptions(1)}</select>
+      <input id="dayNum" type="number" min="1" max="${c.totalDays}" value="${Math.min(c.currentDay+1,c.totalDays)}" placeholder="Journée" style="flex:1"/>
+      <input id="dayTitle" placeholder="Titre de la journée" style="flex:2"/>
+    </div>
+    <div id="scoreRows" class="mt"></div>
+    <div class="mt"><button class="btn gold" onclick="recordChampDay()">💾 Valider la journée</button></div>
+
+    <h3 class="mt" style="color:var(--or)">Fin de saison</h3>
+    <p class="hint">Applique la montée/descente (${c.promoRelegate} montent / ${c.promoRelegate} descendent) et démarre une nouvelle saison.</p>
+    <button class="btn danger" onclick="promoteRelegate()">🔁 Clôturer la saison & appliquer montées/descentes</button>
+  </div>`;
+  renderChampMembers(); renderScoreRows();
+}
+function renderChampMembers(){
+  const el=$('#memberList'); if(!el) return;
+  if(!champMembersCache.length){ el.innerHTML='<p class="hint">Aucun membre. Ajoutez-en.</p>'; return; }
+  el.innerHTML=[1,2,3].map(div=>{
+    const list=champMembersCache.filter(m=>(m.division||3)===div);
+    if(!list.length) return '';
+    return `<div class="hint" style="margin-top:8px">Division ${div}</div>`+list.map(m=>`<div class="live-room">
+      <span>${mascotHtml(m.mascot,'s')} ${esc(m.name)} <span class="hint">par ${esc(m.addedBy||'?')}</span></span>
+      <span class="acts">
+        <select onchange="moveMember('${m.id}',this.value)" style="width:auto;padding:5px">
+          <option value="1" ${div===1?'selected':''}>D1</option><option value="2" ${div===2?'selected':''}>D2</option><option value="3" ${div===3?'selected':''}>D3</option></select>
+        <button class="btn danger small" onclick="delChampMember('${m.id}')">✕</button></span></div>`).join('');
+  }).join('') || '<p class="hint">Aucun membre.</p>';
+}
+function renderScoreRows(){
+  const el=$('#scoreRows'); if(!el) return;
+  const div=parseInt(($('#dayDiv')||{}).value||1);
+  const list=champMembersCache.filter(m=>(m.division||3)===div);
+  el.innerHTML=list.length?list.map(m=>`<div class="row" style="align-items:center;margin-bottom:6px">
+    <span style="flex:2">${esc(m.name)}</span>
+    <input type="number" min="0" id="sc_${m.id}" placeholder="Score" style="flex:1"/>
+    <input type="number" min="0" id="gd_${m.id}" placeholder="Bonnes" style="flex:1"/></div>`).join('')
+    :'<p class="hint">Aucun membre dans cette division.</p>';
+}
+async function addChampMember(){
+  const name=$('#newMember').value.trim(); if(!name) return;
+  const division=parseInt($('#newDiv').value)||3;
+  try{ const r=await api('/championship/members','POST',{name,division}); champMembersCache.push(r.member); $('#newMember').value=''; renderChampMembers(); renderScoreRows(); toast('Membre ajouté ✔'); }
+  catch(e){ const m=$('#cmm'); m.className='msg err'; m.style.display='block'; m.textContent=e.message; }
+}
+async function moveMember(id,division){
+  try{ await api('/championship/move-member','POST',{id,division:parseInt(division)});
+    const mm=champMembersCache.find(m=>m.id===id); if(mm) mm.division=parseInt(division);
+    renderChampMembers(); renderScoreRows(); toast('Déplacé en D'+division+' ✔'); }catch(e){ alert(e.message); }
+}
+async function delChampMember(id){
+  if(!confirm('Retirer ce membre ?')) return;
+  try{ await api('/championship/members/'+id,'DELETE'); champMembersCache=champMembersCache.filter(m=>m.id!==id); renderChampMembers(); renderScoreRows(); }catch(e){ alert(e.message); }
+}
+async function recordChampDay(){
+  const day=parseInt($('#dayNum').value);
+  const division=parseInt($('#dayDiv').value)||1;
+  const quizTitle=$('#dayTitle').value.trim()||('Journée '+day);
+  const list=champMembersCache.filter(m=>(m.division||3)===division);
+  const results=list.map(m=>({ name:m.name, score:parseInt($('#sc_'+m.id).value)||0, good:parseInt($('#gd_'+m.id).value)||0 })).filter(r=>r.score>0||r.good>0);
+  if(!results.length){ const m=$('#cmm'); m.className='msg err'; m.style.display='block'; m.textContent='Saisissez au moins un score.'; return; }
+  try{ await api('/championship/record-day','POST',{ day, division, quizTitle, results });
+    const m=$('#cmm'); m.className='msg ok'; m.style.display='block'; m.textContent='Journée '+day+' (D'+division+') enregistrée ✔';
+    setTimeout(viewChampionship,900);
+  }catch(e){ const m=$('#cmm'); m.className='msg err'; m.style.display='block'; m.textContent=e.message; }
+}
+async function promoteRelegate(){
+  if(!confirm('Clôturer la saison et appliquer les montées/descentes ? Les journées seront remises à zéro pour la nouvelle saison.')) return;
+  try{ const r=await api('/championship/promote-relegate','POST',{});
+    alert('Saison '+ (r.season-1) +' clôturée !\n\nMouvements :\n'+(r.moves.length?r.moves.join('\n'):'aucun')+'\n\nNouvelle saison '+r.season+' démarrée.');
+    viewChampionship();
+  }catch(e){ alert(e.message); }
+}
+
+/* ===================== COURSE KAMI (mode buzzer, anime au choix de l'organisateur) ===================== */
+let raceWs=null, racePin=null, raceQNum=0;
+/* ===================== DUEL 1v1 (2 humains via PIN) ===================== */
+let duelWs=null;
+async function viewDuelSetup(){
+  renderHeader();
+  await loadIaOptions();
+  let myQuizzes=[]; try{ myQuizzes=(await api('/quizzes')).quizzes||[]; }catch{}
+  screen.innerHTML=`<div class="card"><span class="back-link" onclick="viewDashboard()">← Retour</span>
+    <h2 class="title">🆚 Duel <span>1v1</span></h2>
+    <p class="subtitle">Crée un duel, partage le PIN à un ami : le plus fort gagne !</p>
+    <label>Type de questions</label>
+    <div class="team-pick">
+      <div class="team-card sel" id="dq-bank" onclick="duelType('bank')"><div style="font-size:26px">🦊</div><div class="tn">Banque Kami</div><p class="hint">Thème + difficulté</p></div>
+      <div class="team-card" id="dq-quiz" onclick="duelType('quiz')"><div style="font-size:26px">📝</div><div class="tn">Un quiz</div><p class="hint">Quiz composé</p></div>
+    </div>
+    <div id="dq-bankBox">
+      <label class="mt">Thème</label>
+      <select id="duelTheme">${iaOptions.themes.map(t=>`<option value="${t.id}">${t.emoji||''} ${esc(t.name)}</option>`).join('')}</select>
+      <label>Difficulté</label>
+      <select id="duelDiff">${iaOptions.difficulties.map(d=>`<option value="${d.id}" ${d.id==='moyen'?'selected':''}>${esc(d.name)}</option>`).join('')}</select>
+    </div>
+    <div id="dq-quizBox" style="display:none">
+      <label class="mt">Choisir un quiz</label>
+      <select id="duelQuiz">${myQuizzes.length?myQuizzes.map(q=>`<option value="${q.id}">${esc(q.title)}</option>`).join(''):'<option value="">(aucun quiz)</option>'}</select>
+    </div>
+    <div class="mt"><button class="btn gold" onclick="duelCreate()">🆚 Créer le duel</button></div>
+  </div>`;
+}
+let duelMode='bank';
+function duelType(t){ duelMode=t;
+  $('#dq-bank').classList.toggle('sel',t==='bank'); $('#dq-quiz').classList.toggle('sel',t==='quiz');
+  $('#dq-bankBox').style.display=t==='bank'?'block':'none'; $('#dq-quizBox').style.display=t==='quiz'?'block':'none';
+}
+function duelCreate(){
+  const payload={ type:'duel-create', token:TOKEN };
+  if(duelMode==='quiz'){ const q=$('#duelQuiz').value; if(!q){ alert('Aucun quiz disponible.'); return; } payload.quizId=q; }
+  else { payload.theme=$('#duelTheme').value; payload.difficulte=$('#duelDiff').value; }
+  duelWs=new WebSocket(wsUrl());
+  duelWs.onopen=()=> duelWs.send(JSON.stringify(payload));
+  duelWs.onmessage=(ev)=>{ let m; try{m=JSON.parse(ev.data);}catch{return;}
+    if(m.type==='duel-created'){ try{duelWs.close();}catch{} duelWs=null; duelShare(m); }
+    else if(m.type==='error'){ alert(m.message); } };
+}
+function duelShare(m){
+  renderHeader();
+  const url=location.origin+'/play?pin='+m.pin;
+  const txt=encodeURIComponent(`🆚 Je te défie sur Shisnekai no Kami ! Rejoins mon duel — PIN : ${m.pin} — ${url}`);
+  screen.innerHTML=`<div class="card center"><span class="back-link" onclick="viewDashboard()">← Retour</span>
+    <h2 class="title">🆚 Duel <span>créé !</span></h2>
+    <p class="subtitle">${esc(m.title)} · ${m.questionCount} questions</p>
+    <div class="pin-display">${m.pin}</div>
+    <div id="duelQr" style="display:flex;justify-content:center;margin:6px 0"></div>
+    <p class="hint">Partage ce PIN à ton adversaire. Le duel démarre dès qu'il rejoint.</p>
+    <div class="share-grid" style="max-width:360px;margin:10px auto">
+      <a class="share-btn wa" href="https://wa.me/?text=${txt}" target="_blank" rel="noopener"><span class="sico">🟢</span> Défier sur WhatsApp</a>
+      <button class="share-btn tt" onclick="navigator.clipboard&&navigator.clipboard.writeText('${url}');toast('Lien copié ✔')"><span class="sico">📋</span> Copier le lien</button>
+    </div>
+    <div class="mt"><a class="btn gold" href="/play?pin=${m.pin}">⚔️ Entrer dans le duel (je joue !)</a></div>
+  </div>`;
+  try{ if(window.SNKQR) $('#duelQr').innerHTML=SNKQR.svg(url,{size:150,margin:2,dark:'#000',light:'#fff'}); }catch{}
+}
+
+function viewRaceHost(){
+  renderHeader();
+  screen.innerHTML=`<div class="card wide"><span class="back-link" onclick="leaveRace()">← Retour</span>
+    <h2 class="title">🏁 Course <span>Kami</span> — Animateur</h2>
+    <p class="subtitle">Vous posez des questions libres (manga, perso, culture…). Le 1er joueur qui tape la bonne réponse gagne.</p>
+    <label>Titre de la course</label><input id="raceTitle" value="Course Kami — Spécial Animés"/>
+    <div class="mt"><button class="btn gold" onclick="raceCreate()">▶ Créer la course</button></div>
+  </div>`;
+}
+function raceCreate(){
+  const title=$('#raceTitle').value.trim()||'Course Kami';
+  raceWs=new WebSocket(wsUrl());
+  raceWs.onopen=()=> raceWs.send(JSON.stringify({type:'race-create',token:TOKEN,title}));
+  raceWs.onmessage=onRaceHostMsg;
+  raceWs.onclose=()=>{};
+}
+function raceSend(o){ if(raceWs && raceWs.readyState===1) raceWs.send(JSON.stringify(o)); }
+function onRaceHostMsg(ev){
+  let m; try{ m=JSON.parse(ev.data); }catch{ return; }
+  switch(m.type){
+    case 'room-created': racePin=m.pin; raceQNum=0; raceHostLobby(m); break;
+    case 'players': raceUpdatePlayers(m.players); break;
+    case 'race-question-host': raceHostQuestionLive(m); break;
+    case 'race-winner': raceHostWinner(m); break;
+    case 'race-over': raceHostOver(m); break;
+    case 'race-ready': raceHostCompose(); break;
+    case 'race-error': alert(m.message); break;
+    case 'chat': hostChatMsg(m.entry); break;
+    case 'react': floatReact(m.emoji); break;
+    case 'spectators': break;
+  }
+}
+function raceHostLobby(m){
+  renderHeader();
+  const url=location.origin+'/play?pin='+m.pin;
+  screen.innerHTML=`<div class="card wide center"><span class="back-link" onclick="leaveRace()">← Quitter</span>
+    <h2 class="title">🏁 ${esc(m.title)}</h2>
+    <p class="subtitle">Les joueurs rejoignent avec ce PIN (page /play)</p>
+    <div class="pin-display">${m.pin}</div>
+    <div id="raceQr" style="display:flex;justify-content:center;margin:8px 0"></div>
+    <p class="counter"><b id="rpcount">0</b> joueur(s)</p>
+    <div class="players-cloud" id="rcloud"></div>
+    <button class="btn gold mt" onclick="raceHostCompose()">✍️ Poser la 1ère question</button>
+  </div>`;
+  try{ if(window.SNKQR) $('#raceQr').innerHTML=SNKQR.svg(url,{size:150,margin:2,dark:'#000',light:'#fff'}); }catch{}
+}
+function raceUpdatePlayers(players){ const c=$('#rcloud'); if(c) c.innerHTML=players.map(p=>`<span class="player-chip">${mascotHtml(p.mascot,'s')} ${esc(p.name)}</span>`).join(''); if($('#rpcount'))$('#rpcount').textContent=players.length; }
+function raceHostCompose(){
+  renderHeader();
+  screen.innerHTML=`<div class="card wide"><span class="back-link" onclick="raceConfirmEnd()">🏁 Terminer la course</span>
+    <h2 class="title">Question ${raceQNum+1} <span>(à poser)</span></h2>
+    <p class="hint">Astuce : écris une devinette (ex. « Ninja blond au renard à 9 queues »), la réponse (ex. « Naruto »), et un descriptif facultatif. Plusieurs réponses acceptées : séparez par <b>|</b> (ex. Naruto|Naruto Uzumaki).</p>
+    <label>Question / devinette</label><textarea id="rq" placeholder="Ex : Quel personnage possède le Sharingan et veut venger son clan ?"></textarea>
+    <label>Réponse(s) acceptée(s)</label><input id="ra" placeholder="Ex : Sasuke|Sasuke Uchiha"/>
+    <label>Descriptif / indice (optionnel, visible par les joueurs)</label><textarea id="rd" placeholder="Ex : Membre de l'équipe 7, rival de Naruto…"></textarea>
+    <label>Temps (secondes)</label><input id="rt" type="number" min="5" max="120" value="30"/>
+    <div class="mt"><button class="btn gold" onclick="raceAsk()">🚀 Envoyer aux joueurs</button></div>
+  </div>`;
+}
+function raceAsk(){
+  const text=$('#rq').value.trim(), answer=$('#ra').value.trim(), desc=$('#rd').value.trim(), time=parseInt($('#rt').value)||30;
+  if(!text||!answer){ alert('Question et réponse obligatoires.'); return; }
+  raceSend({type:'race-question',text,answer,desc,time});
+}
+function raceHostQuestionLive(m){
+  raceQNum=m.index;
+  renderHeader();
+  screen.innerHTML=`<div class="card wide">
+    <div class="qmeta"><span>Question ${m.index+1}</span><span>⏱ <b id="rtleft">${m.time}</b>s</span></div>
+    <div class="timer-bar"><div class="timer-fill" id="rtfill" style="width:100%"></div></div>
+    <div class="qbig">${esc(m.text)}</div>
+    ${m.desc?`<p class="hint center">${esc(m.desc)}</p>`:''}
+    <div class="card" style="background:rgba(232,196,106,.12);border-color:var(--or);margin-top:12px">
+      <p class="center" style="margin:0">✅ Réponse attendue : <b style="color:var(--or)">${esc(m.answer)}</b> <span class="hint">(visible par vous seul)</span></p></div>
+    <p class="counter mt">⌛ En attente du plus rapide…</p>
+  </div>`;
+  let t=m.time; if(window.SNKSound)SNKSound.tickStart(m.time);
+  if(window._rtimer)clearInterval(window._rtimer);
+  window._rtimer=setInterval(()=>{ t--; if($('#rtleft'))$('#rtleft').textContent=Math.max(0,t); if($('#rtfill'))$('#rtfill').style.width=(Math.max(0,t)/m.time*100)+'%'; if(t<=0)clearInterval(window._rtimer); },1000);
+}
+function raceHostWinner(m){
+  if(window._rtimer)clearInterval(window._rtimer); if(window.SNKSound){SNKSound.tickStop(); m.winner?SNKSound.correct():SNKSound.wrong();}
+  renderHeader();
+  screen.innerHTML=`<div class="card wide center">
+    ${m.winner?`<h2 class="title">⚡ <span>${esc(m.winner)}</span> gagne !</h2><p class="subtitle">Réponse : <b>${esc(m.answer)}</b> (+${m.pts||0})</p>`
+      :`<h2 class="title">⏱️ <span>Temps écoulé</span></h2><p class="subtitle">Personne n'a trouvé. Réponse : <b>${esc(m.answer)}</b></p>`}
+    <h3 class="mt" style="color:var(--or)">Classement</h3>
+    <table class="standings"><tr><th class="pos">#</th><th>Joueur</th><th>Score</th></tr>
+    ${(m.leaderboard||[]).map((p,i)=>`<tr class="${i===0?'top1':''}"><td class="pos">${i+1}</td><td>${mascotHtml(p.mascot,'s')} ${esc(p.name)}</td><td>${p.score}</td></tr>`).join('')}</table>
+    <div class="row mt"><button class="btn gold" onclick="raceSend({type:'race-next'})">➡️ Question suivante</button>
+      <button class="btn alt" onclick="raceConfirmEnd()">🏁 Terminer</button></div>
+  </div>`;
+  if(m.winner) launchConfetti(1500);
+}
+function raceConfirmEnd(){ if(confirm('Terminer la course et afficher le classement final ?')) raceSend({type:'race-end'}); }
+function raceHostOver(m){
+  renderHeader();
+  const medals=['🥇','🥈','🥉'];
+  screen.innerHTML=`<div class="card wide center"><h2 class="title">🏁 Classement <span>final</span></h2>
+    <table class="standings"><tr><th class="pos">#</th><th>Joueur</th><th>Score</th></tr>
+    ${m.leaderboard.map(p=>`<tr class="${p.rank===1?'top1':''}"><td class="pos">${p.rank<=3?medals[p.rank-1]:p.rank}</td><td>${mascotHtml(p.mascot,'s')} ${esc(p.name)}</td><td>${p.score}</td></tr>`).join('')}</table>
+    <div class="row mt"><button class="btn" onclick="leaveRace()">Accueil</button></div>
+    ${socialFollowHtml()}</div>`;
+  launchConfetti(3000); if(window.SNKSound)SNKSound.fanfare();
+  if(raceWs){ try{raceWs.close();}catch{} raceWs=null; }
+}
+function leaveRace(){ if(raceWs){ try{raceWs.close();}catch{} raceWs=null; } if(window.SNKSound){SNKSound.tickStop();SNKSound.lobby(false);} viewDashboard(); }
+
+/* ===================== SPECTATEUR : regarder un duel + chat ===================== */
+async function viewLiveRooms(){
+  renderHeader();
+  screen.innerHTML='<div class="card wide"><span class="back-link" onclick="viewDashboard()">← Retour</span><p class="hint">Recherche des parties en direct…</p></div>';
+  try{
+    const d=await api('/live-rooms');
+    screen.innerHTML=`<div class="card wide"><span class="back-link" onclick="viewDashboard()">← Retour</span>
+      <h2 class="title">👁️ Parties en <span>direct</span></h2>
+      <p class="subtitle">Regardez un duel, discutez et réagissez en live.</p>
+      ${d.rooms.length? d.rooms.map(r=>`<div class="live-room">
+        <span><span class="live-dot"></span><b>${esc(r.title)}</b> · ${r.players} joueur(s) · 👁️ ${r.spectators}</span>
+        <button class="btn gold small" onclick="spectateRoom('${r.pin}')">Regarder</button></div>`).join('')
+        :'<p class="hint center">Aucune partie en direct pour l\'instant.</p>'}
+      <div class="mt"><label>Ou entrez un PIN à regarder</label>
+        <div class="row"><input id="specPin" maxlength="6" placeholder="PIN" style="flex:2;text-align:center;letter-spacing:4px"/>
+          <button class="btn small" style="flex:1" onclick="spectateRoom($('#specPin').value.trim())">Regarder</button></div></div>
+    </div>`;
+  }catch(e){ screen.innerHTML='<div class="card"><p class="msg err" style="display:block">'+esc(e.message)+'</p></div>'; }
+}
+let specWs=null, specPin=null;
+function spectateRoom(pin){
+  if(!/^\d{6}$/.test(pin)){ alert('PIN à 6 chiffres requis.'); return; }
+  specPin=pin;
+  renderHeader();
+  screen.innerHTML=`<div class="card wide"><span class="back-link" onclick="leaveSpectate()">← Quitter</span>
+    <h2 class="title">👁️ Mode <span>spectateur</span> <span class="spectator-count" id="specCount">👁️ …</span></h2>
+    <div class="spectate-layout">
+      <div id="specStage"><p class="hint">Connexion à la partie…</p></div>
+      <div class="chat-box">
+        <div class="chat-head"><span>💬 Chat live</span><span class="hint" id="chatHead"></span></div>
+        <div class="chat-msgs" id="chatMsgs"></div>
+        <div class="react-bar" id="reactBar"></div>
+        <div class="chat-input"><input id="chatInput" maxlength="200" placeholder="Votre message…" onkeydown="if(event.key==='Enter')sendChat()"/><button class="btn" onclick="sendChat()">Envoyer</button></div>
+      </div>
+    </div></div>`;
+  ['👍','❤️','😂','😮','🔥','👏','😱','🦊'].forEach(e=>{ const b=document.createElement('button'); b.textContent=e; b.onclick=()=>sendReact(e); $('#reactBar').appendChild(b); });
+  specWs=new WebSocket(wsUrl());
+  specWs.onopen=()=> specWs.send(JSON.stringify({ type:'spectate', pin:specPin, name: ME?ME.username:'Spectateur' }));
+  specWs.onmessage=onSpecMessage;
+  specWs.onclose=()=>{};
+}
+function leaveSpectate(){ if(specWs){ try{specWs.close();}catch{} specWs=null; } viewLiveRooms(); }
+function specSend(o){ if(specWs && specWs.readyState===1) specWs.send(JSON.stringify(o)); }
+function sendChat(){ const i=$('#chatInput'); if(!i||!i.value.trim()) return; specSend({type:'chat',text:i.value.trim()}); i.value=''; }
+function sendReact(e){ specSend({type:'react',emoji:e}); }
+function onSpecMessage(ev){
+  let m; try{ m=JSON.parse(ev.data); }catch{ return; }
+  switch(m.type){
+    case 'spectate-error': $('#specStage').innerHTML='<p class="msg err" style="display:block">'+esc(m.message)+'</p>'; break;
+    case 'spectating':
+      if($('#specCount')) $('#specCount').textContent='👁️ '+(m.spectators||1);
+      (m.chat||[]).forEach(addChatMsg);
+      if(m.state==='question' && m.question) specShowQuestion(m.question);
+      else if(m.state==='reveal'||m.state==='ended') specShowLeaderboard(m.leaderboard||[]);
+      else specStageMsg(m.state==='lobby'?'⏳ La partie va bientôt commencer…':'En attente…');
+      break;
+    case 'spectators': if($('#specCount')) $('#specCount').textContent='👁️ '+m.count; break;
+    case 'spectate-question': specShowQuestion(m); break;
+    case 'spectate-reveal': specShowReveal(m); break;
+    case 'spectate-gameover': specShowGameover(m); break;
+    case 'chat': addChatMsg(m.entry); break;
+    case 'react': floatReact(m.emoji); break;
+    case 'ai': addChatMsg({sys:true, text:'🦊 Kami : '+m.text, at:Date.now()}); break;
+  }
+}
+function specStageMsg(t){ const s=$('#specStage'); if(s) s.innerHTML='<div class="big-status">'+esc(t)+'</div>'; }
+function specShowQuestion(q){
+  const s=$('#specStage'); if(!s) return;
+  const colors=['a0','a1','a2','a3'], sym=['▲','◆','●','■'];
+  s.innerHTML=`<div class="qmeta"><span>Question ${(q.index!=null?q.index+1:'')} ${q.total?'/ '+q.total:''}</span><span>⏱ ${q.timeLeft!=null?q.timeLeft:q.time}s</span></div>
+    <div class="qbig">${esc(q.text)}</div>
+    ${q.image?`<div class="game-media"><img src="${q.image}" class="game-img"/></div>`:''}
+    <div class="answer-grid">${(q.options||[]).map((o,i)=>`<div class="answer-btn ${colors[i]}"><span class="sym">${sym[i]}</span> ${esc(o)}</div>`).join('')}</div>
+    <p class="hint center mt">👁️ Vous regardez en spectateur</p>`;
+}
+function specShowReveal(m){
+  const s=$('#specStage'); if(!s) return;
+  s.innerHTML=`<h3 class="center" style="color:var(--or)">Résultats</h3>
+    <table class="standings"><tr><th class="pos">#</th><th>Joueur</th><th>Score</th></tr>
+    ${(m.leaderboard||[]).map((p,i)=>`<tr class="${i===0?'top1':''}"><td class="pos">${i+1}</td><td>${mascotHtml(p.mascot,'s')} ${esc(p.name)}</td><td>${p.score}</td></tr>`).join('')}</table>`;
+}
+function specShowLeaderboard(lb){
+  const s=$('#specStage'); if(!s) return;
+  s.innerHTML=`<table class="standings"><tr><th class="pos">#</th><th>Joueur</th><th>Score</th></tr>
+    ${lb.map((p,i)=>`<tr class="${i===0?'top1':''}"><td class="pos">${i+1}</td><td>${mascotHtml(p.mascot,'s')} ${esc(p.name)}</td><td>${p.score}</td></tr>`).join('')}</table>`;
+}
+function specShowGameover(m){
+  const s=$('#specStage'); if(!s) return;
+  s.innerHTML=`<h2 class="title center">🏁 Partie <span>terminée</span></h2>
+    <table class="standings"><tr><th class="pos">#</th><th>Joueur</th><th>Score</th></tr>
+    ${(m.leaderboard||[]).map(p=>`<tr class="${p.rank===1?'top1':''}"><td class="pos">${p.rank<=3?['🥇','🥈','🥉'][p.rank-1]:p.rank}</td><td>${mascotHtml(p.mascot,'s')} ${esc(p.name)}</td><td>${p.score}</td></tr>`).join('')}</table>`;
+  if(window.SNKSound) SNKSound.fanfare?.();
+}
+function addChatMsg(e){
+  const c=$('#chatMsgs'); if(!c||!e) return;
+  const div=document.createElement('div');
+  if(e.sys){ div.className='chat-msg sys'; div.textContent=e.text; }
+  else { div.className='chat-msg '+(e.kind||'spectator'); div.innerHTML=`<span class="who">${esc(e.from)} :</span> ${esc(e.text)}`; }
+  c.appendChild(div); c.scrollTop=c.scrollHeight;
+}
+function floatReact(emoji){
+  const el=document.createElement('div'); el.className='float-react'; el.textContent=emoji;
+  el.style.left=(40+Math.random()*40)+'%'; el.style.bottom='120px';
+  document.body.appendChild(el); setTimeout(()=>el.remove(),2400);
+}
+
+/* ===================== HÔTE TEMPS RÉEL (WebSocket) ===================== */
+let ws=null, gameQuiz=null, currentPin=null, currentCorrect=null;
+function wsUrl(){ const p=location.protocol==='https:'?'wss':'ws'; return p+'://'+location.host; }
+
+let launchOpts = { teamMode:false, teamAssign:'choose' };
+let lobbyPlayers = [], roomInfo=null;
+
+function viewLaunchOptions(quizId){
+  renderHeader();
+  launchOpts = { teamMode:false, teamAssign:'choose', quizId };
+  screen.innerHTML=`<div class="card"><span class="back-link" onclick="viewMyQuizzes()">← Retour</span>
+    <h2 class="title">Options de <span>partie</span></h2>
+    <p class="subtitle">Choisissez le mode de jeu avant de lancer.</p>
+    <label>Mode</label>
+    <div class="team-pick">
+      <div class="team-card sel" id="mode-indiv" onclick="setMode(false)" style="box-shadow:0 0 0 3px rgba(209,20,20,.3)">
+        <div style="font-size:30px">🏃</div><div class="tn">Individuel</div></div>
+      <div class="team-card" id="mode-team" onclick="setMode(true)">
+        <div style="font-size:30px">🛡️</div><div class="tn">Équipes</div></div>
+    </div>
+    <div id="team-config" style="display:none">
+      <label class="mt">Répartition des équipes</label>
+      <div class="team-pick">
+        <div class="team-card sel" id="asg-choose" onclick="setAssign('choose')">
+          <div style="font-size:24px">🙋</div><div class="tn">Choix libre</div>
+          <p class="hint">Chacun choisit son équipe</p></div>
+        <div class="team-card" id="asg-auto" onclick="setAssign('auto')">
+          <div style="font-size:24px">🎲</div><div class="tn">Automatique</div>
+          <p class="hint">Réparti équitablement</p></div>
+      </div>
+      <p class="hint mt">Équipes par défaut : <b style="color:#d11414">Esprits Rouges</b> vs <b style="color:#2b6bd1">Lames Bleues</b></p>
+    </div>
+    ${(ME.role==='admin'||ME.role==='superadmin')?`<label class="remember-row" style="margin-top:14px"><input type="checkbox" id="isChamp" onchange="document.getElementById('champDayBox').style.display=this.checked?'block':'none'"/> <span>🏆 Cette partie est une <b>journée de championnat</b></span></label>
+    <div id="champDayBox" style="display:none">
+      <label>Division</label><select id="champDivSel">${(champCache&&champCache.divisions?champCache.divisions:[{id:1,name:'Division 1'},{id:2,name:'Division 2'},{id:3,name:'Division 3'}]).map(d=>'<option value="'+d.id+'">'+((d.emoji||'')+' '+d.name)+'</option>').join('')}</select>
+      <label>Numéro de journée (1 seul essai par journée+division)</label><input id="champDayNum" type="number" min="1" max="20" value="1"/></div>`:''}
+    <div class="mt"><button class="btn gold" onclick="hostQuiz()">▶ Créer la partie</button></div>
+  </div>`;
+}
+function setMode(team){ launchOpts.teamMode=team;
+  $('#mode-indiv').classList.toggle('sel',!team); $('#mode-indiv').style.boxShadow=!team?'0 0 0 3px rgba(209,20,20,.3)':'';
+  $('#mode-team').classList.toggle('sel',team); $('#mode-team').style.boxShadow=team?'0 0 0 3px rgba(43,107,209,.4)':'';
+  $('#team-config').style.display=team?'block':'none';
+}
+function setAssign(a){ launchOpts.teamAssign=a;
+  $('#asg-choose').classList.toggle('sel',a==='choose'); $('#asg-auto').classList.toggle('sel',a==='auto'); }
+
+let hostIntentionalClose=false, hostReconnectAttempt=0, hostReconnectTimer=null, gameStarted=false;
+const HFIB=[1,1,2,3,5,8,13,21];
+function hostReconnectDelay(n){ return (HFIB[Math.min(n,HFIB.length-1)]||21)*1000; }
+function hostBanner(on, txt){
+  let b=document.getElementById('hostReconBanner');
+  if(on){ if(!b){ b=document.createElement('div'); b.id='hostReconBanner'; b.className='host-recon-banner'; document.body.appendChild(b); } b.textContent=txt||'Reconnexion…'; b.style.display='block'; }
+  else if(b){ b.style.display='none'; }
+}
+async function hostQuiz(){
+  const d=await api('/quizzes'); gameQuiz=d.quizzes.find(q=>q.id===launchOpts.quizId);
+  hostIntentionalClose=false; hostReconnectAttempt=0; gameStarted=false;
+  const isChamp = $('#isChamp') && $('#isChamp').checked;
+  const champDay = isChamp ? parseInt($('#champDayNum').value)||1 : null;
+  const champDivision = isChamp ? (parseInt($('#champDivSel').value)||1) : null;
+  openHostSocket(()=> ws.send(JSON.stringify({ type:'host-create', token:TOKEN, quizId:launchOpts.quizId,
+    teamMode:launchOpts.teamMode, teamAssign:launchOpts.teamAssign, champDay, champDivision })));
+}
+function openHostSocket(onOpen){
+  ws=new WebSocket(wsUrl());
+  ws.onopen=()=>{ hostReconnectAttempt=0; if(onOpen) onOpen(); };
+  ws.onmessage=onHostMessage;
+  ws.onclose=()=>{ if(hostIntentionalClose) return; if(currentPin) scheduleHostReconnect(); };
+  ws.onerror=()=>{};
+}
+function scheduleHostReconnect(){
+  const delay=hostReconnectDelay(hostReconnectAttempt);
+  hostBanner(true, '⚠️ Connexion perdue — reconnexion ('+Math.round(delay/1000)+'s)…');
+  clearTimeout(hostReconnectTimer);
+  hostReconnectTimer=setTimeout(()=>{ hostReconnectAttempt++;
+    openHostSocket(()=> ws.send(JSON.stringify({ type:'host-rejoin', token:TOKEN, pin:currentPin }))); }, delay);
+}
+function wsSend(type, extra){ if(ws && ws.readyState===1) ws.send(JSON.stringify({type, token:TOKEN, ...extra})); }
+
+function onHostMessage(ev){
+  let m; try{ m=JSON.parse(ev.data); }catch{ return; }
+  switch(m.type){
+    case 'room-created': currentPin=m.pin; roomInfo=m; viewLobby(m); break;
+    case 'players': lobbyPlayers=m.players; updatePlayers(m.players); break;
+    case 'game-start': gameStarted=true; prevRanks={}; prevScores={}; if(window.SNKSound) SNKSound.lobby(false); break;
+    case 'question': currentCorrect=m.correct; viewHostQuestion(m); break;
+    case 'answer-progress': updateProgress(m.answered, m.total); break;
+    case 'reveal': viewHostReveal(m); break;
+    case 'gameover': viewHostFinal(m); break;
+    case 'ai': aiShow(m.text); break;
+    case 'mod-ok': toast('Action effectuée ✔'); break;
+    case 'mod-error': alert(m.message); break;
+    case 'rate-limited': toast('⏳ Trop d\'actions, patientez.'); break;
+    case 'rejoin-fail': hostBanner(false); alert(m.message||'Reconnexion impossible.'); leaveGame(); break;
+    case 'host-resync': hostBanner(false); handleHostResync(m); break;
+    case 'spectators': { const el=$('#lobbySpec')||$('#hostSpecCount'); if(el) el.textContent='👁️ '+m.count; break; }
+    case 'chat': hostChatMsg(m.entry); break;
+    case 'react': floatReact(m.emoji); break;
+    case 'error': alert(m.message); break;
+  }
+}
+function hostChatMsg(e){
+  // mini bulle de chat pour l'animateur (coin bas gauche)
+  let box=document.getElementById('hostChat');
+  if(!box){ box=document.createElement('div'); box.id='hostChat';
+    box.style.cssText='position:fixed;left:14px;bottom:14px;z-index:9300;width:280px;max-height:220px;overflow-y:auto;background:rgba(12,12,16,.95);border:1px solid #2c2c2c;border-radius:12px;padding:8px;font-size:12px;';
+    document.body.appendChild(box); }
+  const d=document.createElement('div'); d.style.marginBottom='4px';
+  if(e.sys){ d.style.color='#888'; d.style.fontStyle='italic'; d.textContent=e.text; }
+  else { d.innerHTML='<b style="color:'+(e.kind==='player'?'#5aa0ff':'#bbb')+'">'+esc(e.from)+':</b> '+esc(e.text); }
+  box.appendChild(d); box.scrollTop=box.scrollHeight;
+  clearTimeout(window._hcTimer); window._hcTimer=setTimeout(()=>{ if(box) box.style.opacity='0.4'; }, 8000);
+  box.style.opacity='1';
+}
+function handleHostResync(m){
+  roomInfo={ pin:m.pin, title:m.title, questionCount:m.questionCount, teamMode:m.teamMode, teamAssign:m.teamAssign, teams:m.teams, isAdmin:m.isAdmin };
+  currentPin=m.pin;
+  if(m.state==='lobby'){ lobbyPlayers=m.players||[]; viewLobby(roomInfo); updatePlayers(lobbyPlayers); }
+  else if(m.state==='question'){
+    currentCorrect=m.correct;
+    // reconstruit l'ecran question avec le temps restant exact du serveur
+    viewHostQuestion({ index:m.index, total:m.total, question:{ ...m.question, time:m.timeLeft } });
+    updateProgress(m.answered, m.connected);
+  }
+  else if(m.state==='reveal'){ viewHostReveal({ index:m.index, correct:m.correct, counts:m.counts, leaderboard:m.leaderboard, teams:m.teams, isLast:m.isLast }); }
+  else if(m.state==='ended'){ viewHostFinal({ leaderboard:m.leaderboard, teams:m.teams, teamMode:m.teamMode }); }
+  toast('Reconnecté ✔');
+}
+
+function viewLobby(m){
+  renderHeader();
+  if(window.SNKSound){ SNKSound.unlock(); SNKSound.lobby(true); }
+  const joinUrl = location.origin + '/play?pin=' + m.pin;     // lien direct (QR + partage)
+  const joinHost = location.host;
+  // Texte de partage pour les reseaux sociaux
+  const shareText = `🦊 Rejoignez mon quiz Shisnekai no Kami ! 神\n\nPIN : ${m.pin}\nLien direct : ${joinUrl}\n\nOuvrez le lien (ou /play et entrez le PIN) pour jouer en direct !`;
+  const enc = encodeURIComponent(shareText);
+  const encUrl = encodeURIComponent(joinUrl);
+
+  screen.innerHTML=`<div class="card wide center"><span class="back-link" onclick="leaveGame()">← Annuler</span>
+    <h2 class="title">${esc(m.title)}</h2>
+    <p class="subtitle">Les joueurs rejoignent depuis leur téléphone</p>
+
+    <div class="lobby-share">
+      <div class="qr-box">
+        <div id="qrcode" class="qr-img"></div>
+        <p class="qr-cap">📷 Scannez pour rejoindre</p>
+      </div>
+      <div class="join-info">
+        <div class="join-url">Sur le téléphone : <b>http://${esc(joinHost)}/play</b></div>
+        <p class="subtitle" style="margin:8px 0 4px">PIN de la partie :</p>
+        <div class="pin-display">${m.pin}</div>
+        <div class="row" style="margin-top:6px">
+          <button class="btn alt small" style="flex:1" onclick="copyJoinLink('${joinUrl}')">📋 Copier le lien</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="share-title">Partager l'invitation</p>
+    <div class="share-grid">
+      <a class="share-btn wa" href="https://wa.me/?text=${enc}" target="_blank" rel="noopener">
+        <span class="sico">🟢</span> WhatsApp</a>
+      <a class="share-btn fb" href="https://www.facebook.com/sharer/sharer.php?u=${encUrl}&quote=${enc}" target="_blank" rel="noopener">
+        <span class="sico">🔵</span> Facebook</a>
+      <button class="share-btn ig" onclick="shareSocial('Instagram','${joinUrl}','${m.pin}')">
+        <span class="sico">📸</span> Instagram</button>
+      <button class="share-btn tt" onclick="shareSocial('TikTok','${joinUrl}','${m.pin}')">
+        <span class="sico">🎵</span> TikTok</button>
+    </div>
+    ${navigator.share?`<button class="btn ghost small mt" onclick="nativeShare('${joinUrl}','${m.pin}')">📲 Plus d'options de partage…</button>`:''}
+
+    <p class="hint mt">👁️ Spectateurs : ils peuvent <b>regarder + chatter</b> via « Regarder un duel » et le PIN <b>${m.pin}</b>. <span id="lobbySpec" class="spectator-count">👁️ 0</span></p>
+
+    ${m.teamMode?`<p class="counter mt" style="color:var(--or)">🛡️ Mode ÉQUIPES (${m.teamAssign==='auto'?'répartition automatique':'choix libre'})</p>`:''}
+    <p class="counter mt"><b id="pcount">0</b> / ${MAX_PLAYERS} joueur(s)</p>
+    <div class="players-cloud" id="cloud"></div>
+    <div class="mod-list" id="modlist"></div>
+    <button class="btn gold mt" id="startbtn" onclick="wsSend('start')" disabled>▶ Démarrer (en attente de joueurs)</button>
+  </div>`;
+
+  // Generer le QR code (SVG, hors-ligne)
+  try{
+    const box = document.getElementById('qrcode');
+    if(box && window.SNKQR){ box.innerHTML = SNKQR.svg(joinUrl, { size:200, margin:2, dark:'#000', light:'#fff' }); }
+  }catch(e){ console.warn('QR error', e); }
+}
+
+function copyJoinLink(url){
+  navigator.clipboard?.writeText(url).then(
+    ()=>toast('Lien copié ✔'),
+    ()=>prompt('Copiez le lien :', url)
+  );
+}
+function shareSocial(network, url, pin){
+  const text = `🦊 Rejoignez mon quiz Shisnekai no Kami ! 神 — PIN : ${pin} — ${url}`;
+  // Instagram & TikTok n'ont pas d'API de partage de lien web : on copie le texte et on ouvre l'app/site.
+  navigator.clipboard?.writeText(text).catch(()=>{});
+  const targets = {
+    Instagram: 'https://www.instagram.com/',
+    TikTok: 'https://www.tiktok.com/'
+  };
+  toast('Invitation copiée ✔ — collez-la dans '+network+' (story, bio ou message).');
+  setTimeout(()=>{ window.open(targets[network], '_blank', 'noopener'); }, 900);
+}
+function nativeShare(url, pin){
+  if(navigator.share){
+    navigator.share({
+      title:'Shisnekai no Kami',
+      text:`🦊 Rejoignez mon quiz ! PIN : ${pin}`,
+      url:url
+    }).catch(()=>{});
+  }
+}
+function toast(msg){
+  let t=document.getElementById('snk-toast');
+  if(!t){ t=document.createElement('div'); t.id='snk-toast'; t.className='snk-toast'; document.body.appendChild(t); }
+  t.textContent=msg; t.classList.add('show');
+  clearTimeout(window._toastT); window._toastT=setTimeout(()=>t.classList.remove('show'),2600);
+}
+function teamTag(p){
+  if(!roomInfo || !roomInfo.teamMode || !p.teamId) return '';
+  const t=(roomInfo.teams||[]).find(x=>x.id===p.teamId); if(!t) return '';
+  return `<span class="tag-team" style="background:${t.color}">${esc(t.name)}</span>`;
+}
+function updatePlayers(players){
+  const cloud=$('#cloud');
+  if(cloud) cloud.innerHTML=players.map(p=>`<span class="player-chip ${p.connected===false?'off':''}">${mascotHtml(p.mascot,'s')} ${esc(p.name)}${teamTag(p)}</span>`).join('');
+  if($('#pcount')) $('#pcount').textContent=players.length;
+  const b=$('#startbtn'); if(b){ b.disabled=players.length===0;
+    b.textContent=players.length===0?'▶ Démarrer (en attente de joueurs)':'▶ Démarrer la partie ('+players.length+')'; }
+  renderModList(players);
+}
+function renderModList(players){
+  const ml=$('#modlist'); if(!ml) return;
+  if(!players.length){ ml.innerHTML=''; return; }
+  ml.innerHTML = `<p class="hint" style="text-align:left">🛡️ Modération (animateur) :</p>` + players.map(p=>`
+    <div class="mod-row">
+      <span class="who">${mascotHtml(p.mascot,'s')} ${esc(p.name)} ${teamTag(p)} <span style="color:var(--or)">${p.score} pts</span></span>
+      <span class="acts">
+        <button class="btn alt small" onclick="modAdjust('${p.id}','${esc(p.name)}')">± points</button>
+        <button class="btn alt small" onclick="modKick('${p.id}')">Expulser</button>
+        <button class="btn danger small" onclick="modBan('${p.id}','${esc(p.name)}')">Bannir</button>
+      </span>
+    </div>`).join('');
+}
+function modKick(pid){ if(confirm('Expulser ce joueur ?')) wsSend('mod-kick',{ playerId:pid, pin:currentPin }); }
+function modBan(pid,name){ const r=prompt('Bannir "'+name+'". Raison ?','Non-respect des règles'); if(r!==null) wsSend('mod-ban',{ playerId:pid, pin:currentPin, reason:r }); }
+function modAdjust(pid,name){
+  const v=prompt('Ajuster les points de "'+name+'".\nEntrez un nombre (négatif pour retirer, ex: -200) :','-100');
+  if(v===null) return; const d=parseInt(v); if(isNaN(d)){ alert('Nombre invalide.'); return; }
+  wsSend('mod-adjust',{ playerId:pid, pin:currentPin, delta:d });
+}
+
+function viewHostQuestion(m){
+  renderHeader();
+  const q=m.question, colors=['a0','a1','a2','a3'], sym=['▲','◆','●','■'];
+  screen.innerHTML=`<div class="card wide">
+    <div class="qmeta"><span>Question ${m.index+1} / ${m.total}</span>
+      <span>${q.type==='tf'?'Vrai/Faux':'QCM'} · <b id="tleft">${q.time}</b>s · <span id="prog">0 réponse(s)</span></span></div>
+    <div class="timer-bar"><div class="timer-fill" id="tfill" style="width:100%"></div></div>
+    <div class="qbig">${esc(q.text)}</div>
+    ${mediaHtml(q, {autoplay:true})}
+    <div class="answer-grid">${q.options.map((o,i)=>`<button class="answer-btn ${colors[i]}" disabled><span class="sym">${sym[i]}</span> ${esc(o)}</button>`).join('')}</div>
+    <div class="center mt"><button class="btn alt small" onclick="wsSend('force-reveal')">⏭ Terminer la question maintenant</button></div></div>`;
+  let t=q.time;
+  if(window.SNKSound) SNKSound.tickStart(q.time);
+  if(window._htimer) clearInterval(window._htimer);
+  window._htimer=setInterval(()=>{ t--; if($('#tleft'))$('#tleft').textContent=Math.max(0,t);
+    if($('#tfill'))$('#tfill').style.width=(Math.max(0,t)/q.time*100)+'%';
+    if(t<=0) clearInterval(window._htimer); },1000);
+}
+function updateProgress(a,total){ if($('#prog')) $('#prog').textContent=a+' / '+total+' réponse(s)'; }
+
+let prevRanks = {};      // id -> rang precedent
+let prevScores = {};     // id -> score precedent
+function viewHostReveal(m){
+  if(window._htimer) clearInterval(window._htimer);
+  if(window.SNKSound){ SNKSound.tickStop(); SNKSound.reveal(); }
+  renderHeader();
+  const q=gameQuiz.questions[m.index], colors=['a0','a1','a2','a3'], sym=['▲','◆','●','■'];
+  const lb=m.leaderboard||[];
+  screen.innerHTML=`<div class="card wide">
+    <div class="qmeta"><span>Résultat — Question ${m.index+1}</span><span>${gameQuiz.questions.length-m.index-1} restante(s)</span></div>
+    <div class="qbig">${esc(q.text)}</div>
+    ${q.image?`<div class="game-media"><img src="${q.image}" class="game-img" alt="média"/></div>`:''}
+    <div class="answer-grid">${q.options.map((o,i)=>`<button class="answer-btn ${colors[i]} ${m.correct.includes(i)?'correct':'wrong'}" disabled>
+      <span class="sym">${sym[i]}</span> ${esc(o)} <span style="margin-left:auto;font-size:14px;">${m.counts[i]} ✓</span></button>`).join('')}</div>
+    ${m.teams && m.teams.length?`<h3 class="mt center" style="color:var(--or)">Score des équipes</h3>
+      ${m.teams.map(t=>`<div class="team-row"><span class="dot" style="background:${t.color}"></span><b>${t.rank}.</b> ${esc(t.name)}<span class="team-score">${t.score}</span></div>`).join('')}`:''}
+    ${lb.length?`<h3 class="mt center" style="color:var(--or)">Classement provisoire</h3>
+      <div class="lb-anim" id="lbAnim">${lb.map((p,i)=>{
+        const oldRank = prevRanks[p.id];
+        const delta = (oldRank==null) ? 0 : (oldRank-(i+1)); // >0 monte, <0 descend
+        const arrow = oldRank==null ? '<span class="lb-arrow same">•</span>'
+          : (delta>0 ? `<span class="lb-arrow up">▲${delta}</span>`
+          : (delta<0 ? `<span class="lb-arrow down">▼${-delta}</span>` : '<span class="lb-arrow same">–</span>'));
+        const gained = p.score - (prevScores[p.id]||0);
+        return `<div class="lb-row ${i===0?'top1':''} ${delta>0?'moved-up':''}" data-id="${p.id}" data-rank="${i}">
+          <div class="lb-rank">${i+1}</div>
+          ${arrow}
+          <div class="lb-name">${mascotHtml(p.mascot,'s')} <span class="nm">${esc(p.name)}</span></div>
+          <div class="lb-score">${p.score}${gained>0?`<span class="delta">+${gained}</span>`:''}</div>
+        </div>`;
+      }).join('')}</div>`:''}
+    <div class="center mt"><button class="btn gold" onclick="wsSend('next')">
+      ${m.isLast?'🏁 Voir le classement final':'Question suivante →'}</button></div></div>`;
+
+  // Animation FLIP : place chaque ligne a son ancienne position, puis laisse-la glisser
+  animateLeaderboard(lb);
+
+  // Memorise pour la prochaine question
+  prevRanks = {}; prevScores = {};
+  lb.forEach((p,i)=>{ prevRanks[p.id]=i+1; prevScores[p.id]=p.score; });
+}
+function animateLeaderboard(lb){
+  const cont=document.getElementById('lbAnim'); if(!cont) return;
+  const rows=[...cont.querySelectorAll('.lb-row')];
+  if(!rows.length) return;
+  const rowH = rows[0].getBoundingClientRect().height + 8; // hauteur + marge
+  rows.forEach(row=>{
+    const id=row.dataset.id; const newIdx=parseInt(row.dataset.rank);
+    const oldRank=prevRanks[id];
+    if(oldRank!=null){
+      const oldIdx=oldRank-1;
+      const offset=(oldIdx-newIdx)*rowH;
+      if(offset!==0){ row.style.transition='none'; row.style.transform=`translateY(${offset}px)`; }
+    } else {
+      row.style.transition='none'; row.style.opacity='0'; row.style.transform='translateY(10px)';
+    }
+  });
+  // force reflow puis lance la transition vers la position reelle
+  void cont.offsetHeight;
+  const anyClimb = rows.some(row=>{ const o=prevRanks[row.dataset.id]; return o!=null && (o-1)>parseInt(row.dataset.rank); });
+  requestAnimationFrame(()=>{ requestAnimationFrame(()=>{
+    rows.forEach(row=>{ row.style.transition=''; row.style.transform=''; row.style.opacity='1'; });
+    if(anyClimb && window.SNKSound) setTimeout(()=>SNKSound.climb(), 200);
+  }); });
+}
+
+function viewHostFinal(m){
+  renderHeader();
+  const lb=m.leaderboard, top3=lb.slice(0,3), medals=['🥇','🥈','🥉'];
+  screen.innerHTML=`<div class="card wide center">
+    <h2 class="title">🏆 Classement <span>final</span></h2>
+    <p class="subtitle">${esc(gameQuiz.title)} · ${gameQuiz.questions.length} questions · ${lb.length} joueur(s)</p>
+    ${m.champDay?`<div class="champ-day-badge" style="margin:6px 0">🏆 Journée ${m.champDay} de championnat enregistrée ✔</div>
+      <div class="mt"><button class="btn gold small" onclick="viewChampionship()">Voir le classement général du championnat →</button></div>`:''}
+    <div class="winner-banner" id="winnerBanner"></div>
+    ${m.teamMode && m.teams && m.teams.length?`<h3 class="mt" style="color:var(--or)">🛡️ Classement des équipes</h3>
+      ${m.teams.map(t=>`<div class="team-row"><span class="dot" style="background:${t.color}"></span><b>${t.rank}.</b> ${esc(t.name)}<span class="team-score">${t.score}</span></div>`).join('')}`:''}
+    ${lb.length?`<div class="podium-anim" id="podiumAnim">
+      ${top3[1]?`<div class="pod p2" data-step="2"><div class="pl">${mascotHtml(top3[1].mascot,'m')}</div><div class="nm">🥈 ${esc(top3[1].name)}</div><div class="sc">${top3[1].score}</div></div>`:''}
+      ${top3[0]?`<div class="pod p1" data-step="3"><div class="crown">👑</div><div class="pl">${mascotHtml(top3[0].mascot,'l')}</div><div class="nm">${esc(top3[0].name)}</div><div class="sc">${top3[0].score}</div></div>`:''}
+      ${top3[2]?`<div class="pod p3" data-step="1"><div class="pl">${mascotHtml(top3[2].mascot,'m')}</div><div class="nm">🥉 ${esc(top3[2].name)}</div><div class="sc">${top3[2].score}</div></div>`:''}
+    </div>`:'<p class="hint">Aucun joueur.</p>'}
+    <div class="final-rest" id="finalRest">
+    <h3 class="mt" style="color:var(--or);text-align:left;">Classement complet — du 1er au dernier</h3>
+    <table class="lb"><tr><th>Rang</th><th>Joueur</th><th>Score</th><th>Bonnes rép.</th></tr>
+      ${lb.map(p=>`<tr class="${p.rank===1?'rank-1':''}"><td class="rk">${p.rank<=3?medals[p.rank-1]:''} ${p.rank}</td>
+        <td>${mascotHtml(p.mascot,'s')} ${esc(p.name)}</td><td><b>${p.score}</b></td><td>${p.good} / ${gameQuiz.questions.length}</td></tr>`).join('')}</table>
+    <div class="row mt"><button class="btn" onclick="leaveGame()">Accueil</button>
+      <button class="btn alt" onclick="viewHistory()">Tous les classements</button></div>
+    ${socialFollowHtml()}
+    </div></div>`;
+  hostIntentionalClose=true; clearTimeout(hostReconnectTimer); if(ws){ try{ ws.close(); }catch{} }
+  // Construction animee du podium : 3e -> 2e -> 1er, puis banniere + confettis + reste
+  if(lb.length){
+    if(window.SNKSound){ SNKSound.tickStop(); SNKSound.lobby(false); }
+    const pods=[...document.querySelectorAll('#podiumAnim .pod')].sort((a,b)=>a.dataset.step-b.dataset.step);
+    let delay=300;
+    pods.forEach((pod)=>{ setTimeout(()=>{ pod.classList.add('show'); if(window.SNKSound) SNKSound.reveal(); }, delay); delay+=700; });
+    setTimeout(()=>{
+      const b=$('#winnerBanner');
+      if(b && top3[0]){ b.textContent='🎉 '+top3[0].name+' remporte la victoire ! 🎉'; b.classList.add('show'); }
+      launchConfetti(2600);
+      if(window.SNKSound) SNKSound.fanfare();
+    }, delay+150);
+    setTimeout(()=>{ const r=$('#finalRest'); if(r) r.classList.add('show'); }, delay+900);
+  } else {
+    const r=$('#finalRest'); if(r) r.classList.add('show');
+  }
+}
+
+/* ---------- Confettis (canvas, sans dependance) ---------- */
+function launchConfetti(duration){
+  let cv=document.getElementById('confetti');
+  if(!cv){ cv=document.createElement('canvas'); cv.id='confetti'; document.body.appendChild(cv); }
+  const ctx=cv.getContext('2d');
+  function resize(){ cv.width=innerWidth; cv.height=innerHeight; }
+  resize(); window.addEventListener('resize', resize);
+  const colors=['#d11414','#e8c46a','#2b6bd1','#26b34a','#ff2b2b','#ffffff'];
+  const N=140;
+  const parts=Array.from({length:N},()=>({
+    x:Math.random()*cv.width, y:-20-Math.random()*cv.height*0.4,
+    r:4+Math.random()*6, c:colors[Math.floor(Math.random()*colors.length)],
+    vy:2+Math.random()*4, vx:-2+Math.random()*4, rot:Math.random()*6.28, vr:-0.2+Math.random()*0.4
+  }));
+  const start=Date.now();
+  function frame(){
+    ctx.clearRect(0,0,cv.width,cv.height);
+    const elapsed=Date.now()-start;
+    parts.forEach(p=>{
+      p.x+=p.vx; p.y+=p.vy; p.rot+=p.vr; p.vy+=0.03;
+      ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot); ctx.fillStyle=p.c;
+      ctx.fillRect(-p.r/2,-p.r/2,p.r,p.r*0.6); ctx.restore();
+    });
+    if(elapsed<duration) requestAnimationFrame(frame);
+    else { ctx.clearRect(0,0,cv.width,cv.height); }
+  }
+  frame();
+}
+function leaveGame(){ hostIntentionalClose=true; clearTimeout(hostReconnectTimer); hostBanner(false); currentPin=null; if(ws){ try{ws.close();}catch{} ws=null; } if(window.SNKSound){ SNKSound.lobby(false); SNKSound.tickStop(); } viewDashboard(); }
+
+/* ===================== HISTORIQUE ===================== */
+async function viewHistory(){
+  renderHeader();
+  screen.innerHTML=`<div class="card wide"><span class="back-link" onclick="viewDashboard()">← Retour</span>
+    <h2 class="title">Mes <span>classements</span></h2>
+    <p class="subtitle">${ME.role==='admin'?'Toutes les parties (admin)':'Classements de vos parties'}</p>
+    <div id="hist">Chargement…</div></div>`;
+  try{
+    const d=await api('/results');
+    const c=$('#hist');
+    if(!d.results.length){ c.innerHTML='<p class="hint center">Aucune partie jouée.</p>'; return; }
+    c.innerHTML=d.results.map(r=>{ const dt=new Date(r.playedAt); const w=r.leaderboard[0];
+      return `<div class="quiz-item"><div><h4>${esc(r.quizTitle)}</h4>
+        <p>${dt.toLocaleDateString('fr-FR')} ${dt.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})} ·
+        ${r.leaderboard.length} joueur(s) · PIN ${r.pin} ${w?'· 🥇 '+esc(w.name):''}</p></div>
+        <div class="acts"><button class="btn gold small" onclick="openResult('${r.id}')">Classement</button></div></div>`;
+    }).join('');
+  }catch(e){ $('#hist').innerHTML='<p class="msg err" style="display:block">'+esc(e.message)+'</p>'; }
+}
+async function openResult(id){
+  try{ const d=await api('/results/'+id); const r=d.result;
+    renderHeader();
+    const lb=r.leaderboard, top3=lb.slice(0,3), medals=['🥇','🥈','🥉'];
+    screen.innerHTML=`<div class="card wide center"><span class="back-link" onclick="viewHistory()">← Retour</span>
+      <h2 class="title">🏆 Classement <span>final</span></h2>
+      <p class="subtitle">${esc(r.quizTitle)} · ${r.totalQuestions} questions · ${lb.length} joueur(s)</p>
+      ${lb.length?`<div class="podium">
+        ${top3[1]?`<div class="pod p2"><div class="pl">🥈</div><div class="nm">${esc(top3[1].name)}</div><div class="sc">${top3[1].score}</div></div>`:''}
+        ${top3[0]?`<div class="pod p1"><div class="pl">🥇</div><div class="nm">${esc(top3[0].name)}</div><div class="sc">${top3[0].score}</div></div>`:''}
+        ${top3[2]?`<div class="pod p3"><div class="pl">🥉</div><div class="nm">${esc(top3[2].name)}</div><div class="sc">${top3[2].score}</div></div>`:''}
+      </div>`:''}
+      <h3 class="mt" style="color:var(--or);text-align:left;">Classement complet — du 1er au dernier</h3>
+      <table class="lb"><tr><th>Rang</th><th>Joueur</th><th>Score</th><th>Bonnes rép.</th></tr>
+        ${lb.map(p=>`<tr class="${p.rank===1?'rank-1':''}"><td class="rk">${p.rank<=3?medals[p.rank-1]:''} ${p.rank}</td>
+          <td>${esc(p.name)}</td><td><b>${p.score}</b></td><td>${p.good} / ${r.totalQuestions}</td></tr>`).join('')}</table>
+      </div>`;
+  }catch(e){ alert(e.message); }
+}
+
+/* ===================== ADMIN ===================== */
+async function viewAdmin(){
+  renderHeader();
+  try{
+    const d=await api('/admin/overview');
+    const isSuper = d.me.role==='superadmin';
+    screen.innerHTML=`<div class="card wide"><span class="back-link" onclick="viewDashboard()">← Retour</span>
+      <h2 class="title">🛡️ <span>Administration</span> ${roleBadge(d.me.role)}</h2>
+      <div class="grid2"><div class="menu-tile"><div class="ico">👤</div><h3>${d.users.length}</h3><p>Compte(s)</p></div>
+        <div class="menu-tile"><div class="ico">📝</div><h3>${d.quizCount}</h3><p>Quiz</p></div></div>
+
+      ${isSuper?`<h3 class="mt" style="color:var(--or)">👑 Gestion des rôles</h3>
+      <table class="lb"><tr><th>Nom</th><th>Rôle</th><th>Action</th></tr>
+      ${d.users.map(x=>`<tr><td>${esc(x.username)} ${roleBadge(x.role)}</td>
+        <td>${x.role}</td>
+        <td>${x.role==='superadmin'?'<span class="pill">indestructible</span>':
+            (x.role==='admin'
+              ? `<button class="btn alt small" onclick="roleAction('revoke','${x.id}')">Révoquer</button> <button class="btn danger small" onclick="adminDel('${x.id}')">Suppr.</button>`
+              : `<button class="btn gold small" onclick="roleAction('promote','${x.id}')">Promouvoir admin</button> <button class="btn danger small" onclick="adminDel('${x.id}')">Suppr.</button>`)}</td></tr>`).join('')}
+      </table>`
+      :`<h3 class="mt" style="color:var(--or)">Comptes</h3>
+      <table class="lb"><tr><th>Nom</th><th>Rôle</th><th>Créé</th></tr>
+      ${d.users.map(x=>`<tr><td>${esc(x.username)} ${roleBadge(x.role)}</td><td>${x.role}</td><td>${new Date(x.createdAt).toLocaleDateString('fr-FR')}</td></tr>`).join('')}
+      </table>
+      <p class="hint">Seul le super-admin 👑 peut modifier les rôles et bannir.</p>`}
+
+      ${isSuper?`<h3 class="mt" style="color:var(--or)">🚫 Bannissements <span class="hint">(super-admin)</span></h3>
+      <div class="row" style="margin-bottom:8px">
+        <input id="banname" placeholder="Pseudo à bannir" style="flex:2"/>
+        <button class="btn danger small" style="flex:1" onclick="adminBan()">Bannir</button>
+      </div>
+      <div id="banlist"></div>`:''}
+
+      ${isSuper?`<h3 class="mt" style="color:var(--or)">📊 Statistiques <span class="hint">(super-admin)</span></h3>
+      <div id="statsBox"><p class="hint">Chargement des statistiques…</p></div>`:''}
+
+      <h3 class="mt" style="color:var(--or)">💻 Accès au code source</h3>
+      <div class="code-list" id="codelist"></div>
+      <div id="codeview"></div>
+      <p class="hint mt">${d.resultCount} partie(s) enregistrée(s).</p></div>`;
+    if(isSuper){ renderBans(d.bans||[]); loadStats(); }
+    renderCodeList();
+  }catch(e){ screen.innerHTML='<div class="card"><p class="msg err" style="display:block">'+esc(e.message)+'</p></div>'; }
+}
+async function roleAction(action, id){
+  if(!confirm(action==='promote'?'Promouvoir ce compte en admin ?':'Révoquer les droits admin ?')) return;
+  try{ await api('/admin/'+action,'POST',{id}); toast('Rôle mis à jour ✔'); viewAdmin(); }catch(e){ alert(e.message); }
+}
+async function loadStats(){
+  const box=$('#statsBox'); if(!box) return;
+  try{
+    const s=await api('/admin/stats');
+    const maxV=Math.max(1, ...s.series.map(d=>d.visits));
+    box.innerHTML=`
+      <div class="stat-grid">
+        <div class="stat-card"><h3>${s.today.visits}</h3><p>Visites aujourd'hui</p></div>
+        <div class="stat-card"><h3>${s.today.uniques}</h3><p>Visiteurs uniques (jour)</p></div>
+        <div class="stat-card"><h3>${s.week.visits}</h3><p>Visites (7 jours)</p></div>
+        <div class="stat-card"><h3>${s.games.total}</h3><p>Parties jouées</p></div>
+      </div>
+      <p>Niveau d'affluence aujourd'hui : <span class="affluence-badge" style="background:${s.today.affluence.color}">${s.today.affluence.label}</span></p>
+      <div class="chart-legend"><span><i style="background:var(--rouge)"></i>Visites</span><span><i style="background:var(--bleu)"></i>Visiteurs uniques</span></div>
+      <div class="chart">
+        ${s.series.map(d=>`<div class="bar" title="${d.label} : ${d.visits} visites, ${d.uniques} uniques">
+          <div class="fill" style="height:${Math.round(d.visits/maxV*100)}%"></div>
+          <div class="fill u" style="height:${Math.round(d.uniques/maxV*100)}%"></div>
+          <div class="lbl">${d.label}</div></div>`).join('')}
+      </div>
+      <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat-card"><h3>${s.games.byMode.multi}</h3><p>Parties multijoueur</p></div>
+        <div class="stat-card"><h3>${s.games.byMode.versus}</h3><p>Versus IA</p></div>
+        <div class="stat-card"><h3>${s.games.byMode.solo}</h3><p>Solo entraînement</p></div>
+      </div>
+      <p class="hint">Total cumulé : ${s.totalVisits} visites · ${s.uniqueVisitorsAllTime} visiteurs distincts · ${s.accounts} compte(s).</p>`;
+  }catch(e){ box.innerHTML='<p class="msg err" style="display:block">'+esc(e.message)+'</p>'; }
+}
+function renderBans(bans){
+  const el=$('#banlist'); if(!el) return;
+  if(!bans.length){ el.innerHTML='<p class="hint">Aucun banni.</p>'; return; }
+  el.innerHTML = bans.map(b=>`<div class="mod-row"><span class="who">🚫 ${esc(b.name)} <span class="hint">${esc(b.reason||'')} · par ${esc(b.by||'?')}</span></span>
+    <span class="acts"><button class="btn alt small" onclick="adminUnban('${esc(b.name)}')">Débannir</button></span></div>`).join('');
+}
+async function adminBan(){
+  const name=$('#banname').value.trim(); if(!name) return;
+  const reason=prompt('Raison du bannissement ?','Non-respect des règles'); if(reason===null) return;
+  try{ const r=await api('/admin/ban','POST',{name,reason}); $('#banname').value=''; renderBans(r.bans); toast('Banni ✔'); }catch(e){ alert(e.message); }
+}
+async function adminUnban(name){
+  try{ const r=await api('/admin/unban','POST',{name}); renderBans(r.bans); toast('Débanni ✔'); }catch(e){ alert(e.message); }
+}
+async function renderCodeList(){
+  try{ const d=await api('/admin/code'); const el=$('#codelist');
+    el.innerHTML = d.files.map(f=>`<button class="btn alt small" onclick="viewCode('${f}')">${esc(f)}</button>`).join('');
+  }catch(e){}
+}
+async function viewCode(f){
+  try{ const d=await api('/admin/code/file?f='+encodeURIComponent(f));
+    $('#codeview').innerHTML = `<p class="hint mt">📄 <b>${esc(f)}</b> (lecture seule)</p><div class="code-view">${esc(d.content)}</div>`;
+  }catch(e){ alert(e.message); }
+}
+async function adminDel(id){ if(!confirm('Supprimer ce compte ?'))return; try{ await api('/admin/users/'+id,'DELETE'); viewAdmin(); }catch(e){ alert(e.message);} }
+
+/* ===================== INIT ===================== */
+/* ---------- PWA : service worker + splash + bouton d'installation ---------- */
+function hideSplash(){ const s=document.getElementById('splash'); if(s){ s.classList.add('hide'); setTimeout(()=>{ if(s) s.remove(); }, 600); } }
+if('serviceWorker' in navigator){ window.addEventListener('load', ()=>{ navigator.serviceWorker.register('/sw.js').catch(()=>{}); }); }
+let deferredInstall=null;
+window.addEventListener('beforeinstallprompt',(e)=>{ e.preventDefault(); deferredInstall=e;
+  let b=document.getElementById('installBtn');
+  if(!b){ b=document.createElement('button'); b.id='installBtn'; b.textContent='📲 Installer l\'app'; document.body.appendChild(b);
+    b.onclick=async()=>{ b.style.display='none'; if(deferredInstall){ deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall=null; } }; }
+  b.style.display='block';
+});
+window.addEventListener('appinstalled',()=>{ const b=document.getElementById('installBtn'); if(b) b.style.display='none'; });
+
+/* ---------- Portail de consentement (CGU obligatoire avant l'entree) ---------- */
+const CGU_VERSION = '1.0';
+function consentGiven(){ try{ return localStorage.getItem('snk_cgu') === CGU_VERSION; }catch{ return false; } }
+function requireConsent(){
+  return new Promise(resolve=>{
+    if(consentGiven()){ resolve(true); return; }
+    const g=document.createElement('div'); g.id='cgu-gate';
+    g.innerHTML=`<div class="cgu-card">
+      <div class="cgu-top"><img src="ak-emblem.png" alt="AK"/>
+        <div><h3>Shisnekai <span>no Kami</span></h3><small>神 · CONDITIONS D'UTILISATION & CONFIDENTIALITÉ</small></div></div>
+      <div class="cgu-text">${window.SNK_CGU||'<p>Conditions generales.</p>'}</div>
+      <div class="cgu-foot">
+        <div class="cgu-msg" id="cguMsg"></div>
+        <label class="cgu-check"><input type="checkbox" id="cguChk"/>
+          <span>J'ai lu et j'accepte sans réserve les Conditions Générales d'Utilisation et la politique de confidentialité, et je certifie avoir au moins 13 ans (ou l'autorisation de mon représentant légal).</span></label>
+        <div class="cgu-actions">
+          <button class="btn gold" id="cguAccept">✔ J'accepte et j'entre</button>
+          <button class="btn alt" id="cguRefuse">Refuser</button>
+        </div>
+      </div></div>`;
+    document.body.appendChild(g);
+    const msg=g.querySelector('#cguMsg');
+    g.querySelector('#cguAccept').onclick=()=>{
+      if(!g.querySelector('#cguChk').checked){
+        msg.style.display='block';
+        msg.innerHTML="🙏 Pour entrer, il faut d'abord cocher la case d'acceptation. C'est rapide et ça nous protège tous — merci de votre compréhension !";
+        return;
+      }
+      try{ localStorage.setItem('snk_cgu', CGU_VERSION); localStorage.setItem('snk_cgu_at', new Date().toISOString()); }catch{}
+      g.remove(); resolve(true);
+    };
+    g.querySelector('#cguRefuse').onclick=()=>{
+      g.querySelector('.cgu-text').innerHTML=`<div style="text-align:center;padding:30px 10px">
+        <div style="font-size:46px">🦊</div>
+        <h4 style="color:var(--or)">Pas de souci, on vous attend !</h4>
+        <p>Sans accepter les Conditions d'Utilisation, on ne peut malheureusement pas vous laisser entrer (c'est une obligation pour protéger tout le monde 🙂).</p>
+        <p>Quand vous serez prêt, cochez la case et rejoignez l'aventure Shinsekai no Kami !</p>
+        <span class="cgu-link" id="cguBack">← Revenir et accepter</span></div>`;
+      g.querySelector('#cguBack').onclick=()=> requireConsentReload();
+    };
+  });
+}
+function requireConsentReload(){ const g=document.getElementById('cgu-gate'); if(g) g.remove(); requireConsent().then(()=>{ if(!ME) viewLogin(); }); }
+
+(async function init(){
+  await loadMascots();
+  // garde le splash visible un court instant (effet de demarrage), puis on l'enleve
+  setTimeout(hideSplash, 1400);
+  await requireConsent();   // ⚠️ consentement CGU obligatoire AVANT toute entree
+  if(TOKEN){ try{ const d=await api('/me'); ME=d.user; viewDashboard(); return; }catch{ TOKEN=null; localStorage.removeItem('snk_token'); sessionStorage.removeItem('snk_token'); } }
+  viewLogin();
+})();
+</script>
+</body>
+</html>
